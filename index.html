@@ -1,26 +1,50 @@
 <!doctype html>
 <html lang="ru"><head><meta charset="utf-8">
 <title>Moonshiners — Rocky Mount, 1929</title>
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
 <style>
-  html,body{margin:0;height:100%;overflow:hidden;background:#dfe9d3;font-family:Georgia,serif}
-  #gl{display:block;width:100vw;height:100vh}
+  html,body{margin:0;height:100%;overflow:hidden;background:#dfe9d3;font-family:Georgia,serif;touch-action:none;-webkit-user-select:none;user-select:none}
+  #gl{display:block;width:100vw;height:100vh;touch-action:none}
   .panel{position:fixed;background:rgba(255,250,235,.9);border:1px solid #b9a27a;border-radius:8px;padding:8px 12px;color:#4a3a27;font-size:13px;box-shadow:0 2px 8px rgba(0,0,0,.15)}
-  #top{top:10px;left:10px}
+  #top{top:10px;left:10px;max-width:min(70vw,420px)}
   #top b{font-size:15px}
   #clock{font-variant-numeric:tabular-nums;font-size:22px;display:block}
+  #net{display:block;margin-top:2px;color:#7a6a55;font-size:12px}
   #hint{bottom:10px;left:10px;line-height:1.5}
-  #place{top:10px;left:50%;transform:translateX(-50%);font-size:16px;font-weight:bold;display:none}
+  #place{top:10px;left:50%;transform:translateX(-50%);font-size:16px;font-weight:bold;display:none;max-width:80vw;text-align:center}
   #map{position:fixed;right:10px;bottom:10px;border:2px solid #b9a27a;border-radius:6px;image-rendering:auto;background:#cfe0a3}
   kbd{background:#eee3c9;border:1px solid #b9a27a;border-radius:3px;padding:0 4px;font-family:inherit}
+
+  /* Мобильное управление: видно только на тач-устройствах / без наведения мыши */
+  .mobile-ui{display:none}
+  #joyBase{position:fixed;left:22px;bottom:26px;width:112px;height:112px;border-radius:50%;background:rgba(60,45,25,.35);border:2px solid rgba(255,245,225,.55)}
+  #joyKnob{position:absolute;left:36px;top:36px;width:40px;height:40px;border-radius:50%;background:rgba(255,245,225,.85);border:2px solid #7a5a3a;transition:transform .05s linear}
+  #btnE{position:fixed;right:26px;bottom:34px;width:78px;height:78px;border-radius:50%;background:rgba(201,111,79,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 22px Georgia;align-items:center;justify-content:center}
+  #zoomWrap{position:fixed;right:20px;bottom:150px;flex-direction:column;gap:8px}
+  .zbtn{width:44px;height:44px;border-radius:8px;background:rgba(60,45,25,.55);border:1px solid rgba(255,245,225,.5);color:#fff5e0;font:bold 22px Georgia;align-items:center;justify-content:center}
+  /* Мобильное управление: видно только на тач-устройствах / без наведения мыши. Явный display
+     (flex) задаём ТОЛЬКО здесь — если объявить его в безусловном правиле выше, ID-селектор
+     перебивает .mobile-ui{display:none} по специфичности независимо от медиа-запроса. */
+  @media (pointer:coarse), (hover:none) {
+    .mobile-ui{display:block}
+    #btnE, .zbtn{display:flex}
+    #zoomWrap{display:flex}
+    #hint{display:none}
+    #map{width:120px;height:120px;right:8px;bottom:8px}
+  }
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
 <canvas id="gl"></canvas>
-<div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
+<div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><span id="net"></span><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
 <div class="panel" id="place"></div>
 <div class="panel" id="msg" style="top:60px;left:50%;transform:translateX(-50%);display:none;background:#3a2a1a;color:#f2e6c8;border-color:#7a5a3a"></div>
 <div class="panel" id="hint"><kbd>W A S D</kbd> идти · <kbd>E</kbd> машина / куб / продажа · <kbd>1 2 3</kbd> купить в лавке · <kbd>T</kbd> ускорить время · колесо — зум: чем дальше камера, тем быстрее идёт время (до ×2)</div>
 <canvas id="map" width="192" height="192"></canvas>
+
+<div class="mobile-ui" id="joyBase"><div id="joyKnob"></div></div>
+<div class="mobile-ui" id="btnE">E</div>
+<div class="mobile-ui" id="zoomWrap"><div class="zbtn" id="zoomIn">+</div><div class="zbtn" id="zoomOut">−</div></div>
+
 <script type="module" src="js/game.js"></script>
 </body></html>
