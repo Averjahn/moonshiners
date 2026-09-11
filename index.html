@@ -19,32 +19,69 @@
   .mobile-ui{display:none}
   #joyBase{position:fixed;left:22px;bottom:26px;width:112px;height:112px;border-radius:50%;background:rgba(60,45,25,.35);border:2px solid rgba(255,245,225,.55)}
   #joyKnob{position:absolute;left:36px;top:36px;width:40px;height:40px;border-radius:50%;background:rgba(255,245,225,.85);border:2px solid #7a5a3a;transition:transform .05s linear}
+  /* Прилавок внутри заведения */
+  #shop{display:none;top:50%;right:12px;transform:translateY(-50%);max-width:290px}
+  #shop b{font-size:16px;display:block}
+  #shopClerk{color:#6a5a45;font-style:italic;margin:4px 0 8px;font-size:12px;line-height:1.35}
+  .shopRow{padding:6px 8px;margin:3px 0;border:1px solid #cbb891;border-radius:5px;background:#f3ead6;cursor:pointer}
+  .shopRow:hover{background:#e6d9b8}
+  #shopExit{margin-top:8px;color:#7a6a55;font-size:12px}
+  /* Жар от огня: красная кайма по краям экрана, сила — по урону */
+  #burn{position:fixed;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(255,120,30,0) 45%,rgba(200,50,10,.75) 100%);transition:opacity .15s}
+  #hpbar{display:inline-block;width:70px;height:7px;background:#d9ccb0;border-radius:3px;vertical-align:middle;margin-left:4px;overflow:hidden}
+  #hpbar i{display:block;height:100%;background:#8a3a2a;width:100%}
+  #windTag{color:#7a6a55;font-size:12px}
+  #btnG{position:fixed;right:118px;bottom:34px;width:64px;height:64px;border-radius:50%;background:rgba(170,70,30,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 13px Georgia;align-items:center;justify-content:center}
+  #voiceBtn{margin-top:4px;font:12px Georgia;background:#eee3c9;border:1px solid #b9a27a;border-radius:4px;padding:1px 6px;color:#4a3a27;cursor:pointer;transition:box-shadow .08s}
+  #btnV{position:fixed;left:150px;bottom:40px;width:58px;height:58px;border-radius:50%;background:rgba(40,90,110,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 12px Georgia;align-items:center;justify-content:center}
+  #roleBtn{margin-top:4px;font:12px Georgia;background:#eee3c9;border:1px solid #b9a27a;border-radius:4px;padding:1px 6px;color:#4a3a27;cursor:pointer}
+  /* Выбор стороны */
+  #roleOverlay{position:fixed;inset:0;background:rgba(28,22,14,.86);display:none;align-items:center;justify-content:center;z-index:50}
+  #roleOverlay .rbox{background:#f6efdd;border:2px solid #b9a27a;border-radius:12px;padding:22px 26px;max-width:520px;text-align:center;color:#3a2e1e}
+  #roleOverlay h1{font-size:20px;margin:0 0 4px}
+  #roleOverlay p{margin:0 0 16px;color:#6a5a45;font-size:14px}
+  #roleOverlay button{display:block;width:100%;margin:8px 0;padding:12px 14px;border-radius:8px;border:1px solid #b9a27a;background:#eadfc4;font:bold 16px Georgia;color:#3a2e1e;cursor:pointer;text-align:left}
+  #roleOverlay button:hover{background:#e0d2b0}
+  #roleOverlay button span{display:block;font:13px Georgia;color:#6a5a45;margin-top:3px}
+  #btnF{position:fixed;right:26px;bottom:126px;width:78px;height:78px;border-radius:50%;background:rgba(60,80,120,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 14px Georgia;align-items:center;justify-content:center}
   #btnE{position:fixed;right:26px;bottom:34px;width:78px;height:78px;border-radius:50%;background:rgba(201,111,79,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 22px Georgia;align-items:center;justify-content:center}
-  #zoomWrap{position:fixed;right:20px;bottom:150px;flex-direction:column;gap:8px}
+  #zoomWrap{position:fixed;right:20px;bottom:224px;flex-direction:column;gap:8px}
   .zbtn{width:44px;height:44px;border-radius:8px;background:rgba(60,45,25,.55);border:1px solid rgba(255,245,225,.5);color:#fff5e0;font:bold 22px Georgia;align-items:center;justify-content:center}
   /* Мобильное управление: видно только на тач-устройствах / без наведения мыши. Явный display
      (flex) задаём ТОЛЬКО здесь — если объявить его в безусловном правиле выше, ID-селектор
      перебивает .mobile-ui{display:none} по специфичности независимо от медиа-запроса. */
   @media (pointer:coarse), (hover:none) {
     .mobile-ui{display:block}
-    #btnE, .zbtn{display:flex}
+    #btnE, #btnF, #btnG, #btnV, .zbtn{display:flex}
     #zoomWrap{display:flex}
     #hint{display:none}
-    #map{width:120px;height:120px;right:8px;bottom:8px}
+    #map{width:112px;height:112px;left:22px;right:auto;bottom:152px}
   }
 </style>
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
 <canvas id="gl"></canvas>
-<div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><span id="net"></span><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
+<div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><span id="net"></span><span id="hpRow" style="display:block;font-size:12px">здоровье <span id="hpbar"><i id="hpfill"></i></span> <span id="windTag"></span></span><button id="roleBtn">сменить сторону</button> <button id="voiceBtn">Голос: выкл</button><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
 <div class="panel" id="place"></div>
 <div class="panel" id="msg" style="top:60px;left:50%;transform:translateX(-50%);display:none;background:#3a2a1a;color:#f2e6c8;border-color:#7a5a3a"></div>
-<div class="panel" id="hint"><kbd>W A S D</kbd> идти · <kbd>E</kbd> машина / куб / продажа · <kbd>1 2 3</kbd> купить в лавке · <kbd>T</kbd> ускорить время · колесо — зум: чем дальше камера, тем быстрее идёт время (до ×2)</div>
+<div class="panel" id="hint"><kbd>W A S D</kbd> идти · <kbd>E</kbd> машина / куб / продажа · <kbd>F</kbd> осмотр (закон) / замести следы · <kbd>G</kbd> поджечь (нужен керосин) · <kbd>V</kbd> говорить (голос рядом) · <kbd>B</kbd> карта пожарных отсеков · <kbd>1 2 3</kbd> купить в лавке · <kbd>T</kbd> ускорить время · колесо — зум: чем дальше камера, тем быстрее идёт время (до ×2)</div>
+<div class="panel" id="shop"><b id="shopTitle"></b><div id="shopClerk"></div><div id="shopRows"></div><div id="shopExit">Цифры 1-5 или щелчок · <kbd>E</kbd> у двери — выйти</div></div>
 <canvas id="map" width="192" height="192"></canvas>
 
 <div class="mobile-ui" id="joyBase"><div id="joyKnob"></div></div>
 <div class="mobile-ui" id="btnE">E</div>
+<div class="mobile-ui" id="btnF">Осмотр</div>
+<div class="mobile-ui" id="btnG">Поджечь</div>
+<div class="mobile-ui" id="btnV">Говорить</div>
+<div id="burn"></div>
 <div class="mobile-ui" id="zoomWrap"><div class="zbtn" id="zoomIn">+</div><div class="zbtn" id="zoomOut">−</div></div>
+
+<div id="roleOverlay"><div class="rbox">
+  <h1>Округ Франклин, Вирджиния · 1929</h1>
+  <p>Сухой закон. Выбери сторону — мир и экономика общие для всех.</p>
+  <button data-role="shiner">Самогонщик<span>Собрать аппарат у ручья, гнать, возить в город и заметать за собой следы (F)</span></button>
+  <button data-role="law">Федеральный агент<span>Искать улики (F), собирать дело на куб, устраивать облавы и досматривать машины</span></button>
+</div></div>
 
 <script type="module" src="js/game.js"></script>
 </body></html>
