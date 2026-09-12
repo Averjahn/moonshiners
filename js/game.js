@@ -802,7 +802,15 @@ function syncEvidence() {
 const IN_ORIGIN = { x: -80, z: 60 };
 let interior = null;
 const ENTERABLE = [...new Set([...world.buildings.filter(b => b.business && b.name !== 'BILLIARDS').map(b => b.name), 'Мельница', 'Депо'])];
-function canEnter() { for (const n of ENTERABLE) if (nearBuilding(n, 5.5)) return n; if (nearSpeak()) return 'BILLIARDS'; return null; }
+// Ближайшая дверь и расстояние до неё: расстояние нужно, чтобы E у припаркованной машины
+// сажал в машину, а не затаскивал в лавку, когда та стоит вплотную к дверям.
+function nearDoor() { const f = player.inCar ? car.pos : player.pos; let best = null;
+  for (const n of ENTERABLE) { const b = nearBuilding(n, 5.5); if (!b) continue;
+    const d = Math.hypot(X(b.i + b.w / 2) - f.x, Z(b.j + b.d / 2) - f.z); if (!best || d < best.d) best = { name: n, d }; }
+  if (!best && nearSpeak()) best = { name: 'BILLIARDS', d: 0 };
+  return best; }
+// своя машина рядом и в неё можно сесть
+function carBoardable() { return !player.inCar && car.mesh.visible && (offline || eco.vehicle) && player.pos.distanceTo(car.pos) < 3; }
 function enterShop(name) {
   if (player.inCar) return say('Сначала выйди из машины');
   if (interior) return;
@@ -955,7 +963,8 @@ function lawInteract() {
     return startWork('Рубим аппарат топорами', .8, () => net.send({ t: 'raid', still: s.id })); }
   const t = nearestRemote(7);
   if (t) return startWork(`Досмотр: ${t.name}`, .4, () => net.send({ t: 'frisk' }));
-  const e = canEnter(); if (e && !player.inCar) return enterShop(e);   // закон тоже заходит внутрь — там книга покупок
+  const e = nearDoor();   // закон тоже заходит внутрь — там книга покупок; но своя машина у дверей важнее
+  if (e && !player.inCar && !(carBoardable() && player.pos.distanceTo(car.pos) < e.d)) return enterShop(e.name);
   toggleCar();
 }
 // F — главное действие роли: закон осматривает местность, самогонщик заметает следы.
@@ -987,7 +996,11 @@ function interact() {
   if (nearSpeak()) { if (player.inCar) { if (eco.carJugs <= 0) return say('Хозяин: «Привози товар, возьму по $5. Лучше ночью»');
       if (offline) { eco.cash += eco.carJugs * SELL_PRICE; eco.carJugs = 0; return say('Продано'); } return net.send({ t: 'sell', inCar: true }); }
     return enterShop('BILLIARDS'); }
-  { const e = canEnter(); if (e) { if (player.inCar) return say('Выйди из машины, чтобы зайти внутрь'); return enterShop(e); } }
+  { const e = nearDoor();
+    // машина у самых дверей лавки: E садит в неё, если она ближе двери. Из машины E просто высаживает.
+    if (e && !(carBoardable() && player.pos.distanceTo(car.pos) < e.d)) {
+      if (player.inCar) return toggleCar();
+      return enterShop(e.name); } }
   if (nearTile([T.ROCK], 2)) { if (!carNear()) return say('Камни тяжёлые — подгони машину'); return startWork('Собираем камни для очага', .5, () => { if (offline) { inv.stone += 3; say('+3 камня'); } else net.send({ t: 'gather', kind: 'stone' }); }); }
   if (nearTile([T.FOREST], 1)) { return startWork('Рубим дрова', .5, () => { if (offline) { inv.wood += 3; say('+3 дров'); } else net.send({ t: 'gather', kind: 'wood' }); }); }
   toggleCar();
