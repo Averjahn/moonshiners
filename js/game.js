@@ -745,6 +745,34 @@ net.on('car', msg => { eco.vehicle = msg.vehicle; });
 net.on('econ', msg => { catalog = msg.catalog; if (msg.catalog && msg.catalog.biz) applyShops(Object.values(msg.catalog.biz)); });
 net.on('shops', msg => { applyShops(msg.list); shopSig = ''; });   // чужая лавка подняла цену — увидим сразу
 net.on('shares', msg => { offers = msg.offers || []; shopSig = ''; });
+// Переезд к своему делу: сервер зовёт по ключу заведения, место у дверей ищем сами —
+// координаты дверей и так известны клиенту, а свободную клетку рядом надо ещё подобрать.
+net.on('goto', msg => gotoPlace(msg.place));
+function placeDoor(key) {
+  const farm = FARM_DOORS.find(d => d.key === key); if (farm) return { x: farm.x, z: farm.z + 2 };
+  const b = world.buildings.find(q => q.name === key); if (!b) return null;
+  return { x: X(b.i + b.w / 2), z: Z(b.j + b.d) + 2.2 };   // перед фасадом, а не внутри стен
+}
+function freeSpotNear(p) {
+  if (!blockedAt(p.x, p.z)) return p;
+  for (let r = 1.5; r <= 9; r += 1.5) for (let a = 0; a < 12; a++) {
+    const x = p.x + Math.cos(a / 12 * 6.283) * r, z = p.z + Math.sin(a / 12 * 6.283) * r;
+    if (!blockedAt(x, z)) return { x, z };
+  }
+  return p;
+}
+function gotoPlace(key) {
+  const door = placeDoor(key); if (!door) return;
+  if (interior) exitShop();
+  const spot = freeSpotNear(door);
+  player.inCar = false; player.mesh.visible = true;
+  player.pos.set(spot.x, 0, spot.z); player.yaw = 0;
+  camTarget.copy(player.pos);
+  const cs = freeSpotNear({ x: spot.x + 3.5, z: spot.z + 3.5 });   // машину подгоняем следом, чтобы не бежать за ней через город
+  if (!blockedAt(cs.x, cs.z)) { car.pos.set(cs.x, 0, cs.z); car.speed = 0; car.mesh.position.set(cs.x, hAt(cs.x, cs.z), cs.z); }
+  const sh = shops[key];
+  say(`Ты на месте: ${sh ? sh.name : key}`);
+}
 net.on('welcome', msg => { if (msg.offers) offers = msg.offers; });
 net.on('market', msg => { market = msg; shopSig = ''; });
 // часы сервера: смещение по пингу, чтобы все клиенты рисовали чужих в одном и том же моменте времени
