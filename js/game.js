@@ -628,6 +628,9 @@ let shops = {};                                                // состоян
 const roleTitle = r => r === 'law' ? 'Федеральный агент' : r === 'owner' ? ((BIZ[String(myBiz).split('#')[0]] || {}).role || 'Хозяин дела') : 'Самогонщик';
 function setRole(r, tell, biz) {
   if (r !== 'law' && r !== 'shiner' && r !== 'owner') return;
+  // Дело может быть уже занято, и решает это сервер. Поэтому выбор хозяина НЕ применяем сразу:
+  // отправляем заявку и ждём ответа — иначе в шапке висела бы профессия, которой у нас нет.
+  if (r === 'owner' && tell) { net.send({ t: 'role', role: 'owner', biz: biz || myBiz }); return; }
   if (r === 'owner') { if (biz) myBiz = biz; if (!myBiz) return; localStorage.setItem('moon_biz', myBiz); }
   const changed = myRole !== r; myRole = r; localStorage.setItem('moon_role', r);
   if (changed || !player.mesh.userData.role) {
@@ -716,8 +719,8 @@ function sendMove(realDt) {
 }
 const net = connect(myName, myRole || 'shiner');
 let evidence = [], cases = {};
-net.on('welcome', msg => { myId = msg.id; netTime = msg.time; netDay = msg.day; heat = msg.heat; eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; mergeStills(msg.stills); applyPlayers(msg.players, msg.now); setRole(msg.role); });
-net.on('you', msg => { eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; if (msg.role) setRole(msg.role, false, msg.biz); });
+net.on('welcome', msg => { myId = msg.id; netTime = msg.time; netDay = msg.day; heat = msg.heat; eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; mergeStills(msg.stills); applyPlayers(msg.players, msg.now); if (msg.chosen) setRole(msg.role, false, msg.biz); });
+net.on('you', msg => { eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; if (msg.role && msg.chosen) setRole(msg.role, false, msg.biz); });
 net.on('evidence', msg => { evidence = msg.list; cases = msg.cases || {}; syncEvidence(); });
 // ---- экономика: гараж игрока, кредит, розыск и цены города приходят с сервера
 let catalog = null, market = null, vehKey = '';
@@ -1219,6 +1222,10 @@ function fillRoleList() {
   const btn = document.getElementById('roleBtn'); if (btn) btn.addEventListener('click', () => { ov.style.display = 'flex'; });
   ov.style.display = myRole ? 'none' : 'flex';
   const bf = document.getElementById('btnF'); if (bf) bf.textContent = myRole === 'law' ? 'Осмотр' : 'Замести';
+  // Пока игрок не выбрал персонажа на ЭТОМ сервере, окно держим открытым — даже если в браузере
+  // осталась роль с прошлого раза. Роль по умолчанию приходит с сервера и выбором не считается.
+  net.on('welcome', msg => { if (!msg.chosen) { myRole = null; myBiz = null; localStorage.removeItem('moon_role'); localStorage.removeItem('moon_biz');
+    ov.style.display = 'flex'; if (roleListEl) fillRoleList(); } });
 })();
 
 // справочник дизайнера: Q+W+E (на телефоне — три быстрых касания по названию города)
