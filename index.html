@@ -11,6 +11,39 @@
   #clock{font-variant-numeric:tabular-nums;font-size:22px;display:block}
   #net{display:block;margin-top:2px;color:#7a6a55;font-size:12px}
   #hint{bottom:10px;left:10px;line-height:1.5}
+  /* Подсказка обучения: одна задача за раз, с объяснением «зачем» — по методике обучения бизнес-симуляторов */
+  /* Личные вещи: партии товаров со сроком годности */
+  #bag{display:none;top:50%;left:50%;transform:translate(-50%,-50%);max-width:420px;width:min(92vw,420px);max-height:70vh;overflow:auto;z-index:20}
+  #bag b{font-size:15px}
+  #bagCount{color:#7a6a55;font-size:12px;font-weight:normal}
+  #bagHint{margin-top:8px;font-size:11px;color:#7a6a55;line-height:1.4}
+  .bagRow{display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #e0d6bd}
+  .bagRow:last-of-type{border-bottom:0}
+  .bagRow .nm{flex:1}
+  .bagRow .nm i{display:block;font-size:11px;color:#7a6a55;font-style:normal}
+  .bagRow .fr{font-size:11px;padding:1px 6px;border-radius:3px;white-space:nowrap}
+  .fr.ok{background:#dfe9cf;color:#41632f}.fr.mid{background:#f0e3c2;color:#8a6a2a}.fr.bad{background:#efd6cf;color:#8a3a2a}
+  .bagRow button{font:12px Georgia;background:#eee3c9;border:1px solid #b9a27a;border-radius:4px;padding:2px 8px;color:#4a3a27;cursor:pointer}
+  /* Вкладки в заведении */
+  #shopTabs{display:flex;gap:4px;margin:2px 0 6px}
+  .shopTab{font:12px Georgia;background:none;border:1px solid #cbb891;border-radius:4px;padding:2px 9px;color:#6a5a45;cursor:pointer}
+  .shopTab.on{background:#e6d9b8;color:#3a2e1e;border-color:#b9a27a}
+  .shopRow{display:flex;gap:7px;align-items:baseline}
+  .shopRow .rowN{color:#8a7a5a;font-size:11px;min-width:9px}
+  .shopRow i{display:block;font-size:11px;color:#7a6a55;font-style:normal;margin-top:1px}
+  .shopRow.info{background:#efe7d2;cursor:default}
+  .shopRow.info:hover{background:#efe7d2}
+  #tut{top:150px;left:10px;max-width:290px;display:none}
+  #tutHead{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  #tutHead b{font-size:14px}
+  #tutStep{font-size:11px;color:#7a6a55;white-space:nowrap}
+  #tutTodo{margin-top:4px;font-size:13px}
+  #tutWhy{margin-top:5px;font-size:12px;color:#6a5a45;line-height:1.4}
+  #tutWhere{margin-top:5px;font-size:12px;color:#8a6a3a;line-height:1.35}
+  #tutBar{height:4px;background:#d9ccb0;border-radius:2px;margin-top:8px;overflow:hidden}
+  #tutBar i{display:block;height:100%;background:#6a7a3a;width:0;transition:width .4s}
+  #tutHide{margin-top:8px;font:11px Georgia;background:none;border:0;color:#7a6a55;cursor:pointer;padding:0;text-decoration:underline}
+  #tutShow{display:none;position:fixed;top:150px;left:10px;font:12px Georgia;background:rgba(255,250,235,.9);border:1px solid #b9a27a;border-radius:6px;padding:4px 9px;color:#4a3a27;cursor:pointer}
   #place{top:10px;left:50%;transform:translateX(-50%);font-size:16px;font-weight:bold;display:none;max-width:80vw;text-align:center}
   #map{position:fixed;right:10px;bottom:10px;border:2px solid #b9a27a;border-radius:6px;image-rendering:auto;background:#cfe0a3}
   kbd{background:#eee3c9;border:1px solid #b9a27a;border-radius:3px;padding:0 4px;font-family:inherit}
@@ -68,8 +101,22 @@
 <div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><span id="net"></span><span id="hpRow" style="display:block;font-size:12px">здоровье <span id="hpbar"><i id="hpfill"></i></span> сытость <span id="fedbar"><i id="fedfill"></i></span> <span id="windTag"></span></span><button id="roleBtn">сменить сторону</button> <button id="voiceBtn">Голос: выкл</button><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
 <div class="panel" id="place"></div>
 <div class="panel" id="msg" style="top:60px;left:50%;transform:translateX(-50%);display:none;background:#3a2a1a;color:#f2e6c8;border-color:#7a5a3a"></div>
-<div class="panel" id="hint"><kbd>W A S D</kbd> идти · <kbd>E</kbd> машина / куб / продажа · <kbd>F</kbd> осмотр (закон) / замести следы · <kbd>G</kbd> поджечь (нужен керосин) · <kbd>V</kbd> говорить (голос рядом) · <kbd>B</kbd> карта пожарных отсеков · <kbd>1 2 3</kbd> купить в лавке · <kbd>T</kbd> ускорить время · колесо — зум: чем дальше камера, тем быстрее идёт время (до ×2)</div>
-<div class="panel" id="shop"><b id="shopTitle"></b><div id="shopClerk"></div><div id="shopRows"></div><div id="shopExit">Цифры 1-5 или щелчок · <kbd>E</kbd> у двери — выйти</div></div>
+<div class="panel" id="bag">
+  <b>Личные вещи <span id="bagCount"></span></b>
+  <div id="bagRows"></div>
+  <div id="bagHint">Портится со временем: дата — от часа изготовления на ферме. <kbd>I</kbd> — закрыть</div>
+</div>
+<div class="panel" id="tut">
+  <div id="tutHead"><b id="tutTitle">Обучение</b><span id="tutStep"></span></div>
+  <div id="tutTodo"></div>
+  <div id="tutWhy"></div>
+  <div id="tutWhere"></div>
+  <div id="tutBar"><i id="tutFill"></i></div>
+  <button id="tutHide">скрыть подсказки</button>
+</div>
+<button id="tutShow">Обучение</button>
+<div class="panel" id="hint"><kbd>W A S D</kbd> идти · <kbd>E</kbd> машина / куб / продажа · <kbd>F</kbd> осмотр (закон) / замести следы · <kbd>G</kbd> поджечь (нужен керосин) · <kbd>V</kbd> говорить (голос рядом) · <kbd>I</kbd> личные вещи · <kbd>B</kbd> карта пожарных отсеков · <kbd>1 2 3</kbd> купить в лавке · <kbd>T</kbd> ускорить время · колесо — зум: чем дальше камера, тем быстрее идёт время (до ×2)</div>
+<div class="panel" id="shop"><b id="shopTitle"></b><div id="shopClerk"></div><div id="shopTabs"></div><div id="shopRows"></div><div id="shopExit">Цифры 1-5 или щелчок · <kbd>E</kbd> у двери — выйти</div></div>
 <canvas id="map" width="192" height="192"></canvas>
 
 <div class="mobile-ui" id="joyBase"><div id="joyKnob"></div></div>

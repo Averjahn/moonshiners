@@ -7,8 +7,10 @@ import { buildInterior, PLACES, clerkFigure } from './interior.js';
 import { createFire, ignite as igniteFire, stepFire, tickMirror, applyChanges, fireDamageAt, nearestFuelCell, intensity as fireIntensity, S as FS, FUEL_PROPS } from './fire.js';
 import { setupDesigner } from './designer.js';
 import { CARS, ECON, SERVICES, JOBS, DEALERS, dealerModels, resale, repairCost, fairRent, BIZ, bizRef, bizLicense, bizPriceFit,
-  shareFair, sharePriceBounds, sharesOf, fedSpeed, fedState } from './economy.js';
+  shareFair, sharePriceBounds, sharesOf, fedSpeed, fedState, freshness, freshWord, hoursLeft, PRODUCE } from './economy.js';
 import { createVoice } from './voice.js';
+import { currentStep } from './tutorial.js';
+import { spawnNear, doorPoint, canStand, PLAYER_R } from './spawn.js';
 
 // ================= НАСТРОЙКИ =================
 const TS = 2, FH = 1.3;
@@ -194,7 +196,14 @@ function igniteAction() {
   const p = player.inCar ? car.pos : player.pos, k = nearestFuelCell(fire, p.x, p.z, TS, 1.8);
   if (k < 0) return say('Тут нечему гореть: дорога, вода, просека или уже гарь');
   startWork('Плещем керосин и чиркаем спичкой', .25, () => { if (offline) { igniteFire(fire, k); say(`Полыхнуло: ${FUEL_PROPS[world.fuel[k]].name}`); } else net.send({ t: 'ignite' }); }); }
-function burnedTo(x, z, text) { if (player.inCar) { player.inCar = false; player.mesh.visible = true; car.speed = 0; } player.pos.set(x, 0, z); camTarget.copy(player.pos); hp = 100; say(text); }
+// Очнулся после ожога: место ищем так же, как при высадке у заведения, — сервер присылает
+// точку у гостиницы или на площади, а она может оказаться в стене.
+function burnedTo(x, z, text) {
+  if (player.inCar) { player.inCar = false; player.mesh.visible = true; car.speed = 0; }
+  if (interior) exitShop();
+  const spot = spawnNear(blockedAt, { x, z }, PLAYER_R);
+  player.pos.set(spot.x, 0, spot.z); camTarget.copy(player.pos); hp = 100; say(text);
+}
 const CROP_CHAR = new THREE.Color('#4a3a2a'), CROP_LIVE = new THREE.Color(1, 1, 1);
 function setCrop(k, burnt) { const n0 = cropIndex[k]; if (n0 < 0 || !cropMesh) return; const arr = cropMesh.instanceMatrix.array;
   for (let q = 0; q < 4; q++) { const o = (n0 + q) * 16; for (let e = 0; e < 16; e++) arr[o + e] = cropBase[o + e];
@@ -644,7 +653,7 @@ function setRole(r, tell, biz) {
 let myId = null, netTime = 6.5, netDay = 1, heat = 0;
 const remote = new Map(); // id -> { walk, car, buf: снимки с сервера, disp: что рисуем сейчас, inCar, name }
 const REMOTE_COLORS = ['#7a3a3a', '#3a5a7a', '#5a7a3a', '#7a5a2a', '#5a3a7a', '#2a6a6a'];
-function mergeStills(list) { for (const it of list) { const s = world.stills.find(x => x.id === it.id); if (s) Object.assign(s, { step: it.step, stage: it.stage, mash: it.mash, gallons: it.gallons }); } }
+function mergeStills(list) { for (const it of list) { const s = world.stills.find(x => x.id === it.id); if (s) Object.assign(s, { step: it.step, stage: it.stage, mash: it.mash, gallons: it.gallons, owner: it.owner }); } }
 function ensureRemote(id, name, role) { let r = remote.get(id);
   if (r && r.role !== role) { scene.remove(r.walk); scene.remove(r.car); remote.delete(id); r = null; }   // сменил сторону — переодеваем
   if (!r) { const col = role === 'law' ? SKIN.law.car : REMOTE_COLORS[id % REMOTE_COLORS.length]; const walk = mkPlayer(role); const carM = mkCar(col); carM.visible = false; scene.add(walk); scene.add(carM);
@@ -728,7 +737,8 @@ function rebuildCar(model, force) { if (!force && car.model === model && car.mes
   const vis = car.mesh ? car.mesh.visible : true; if (car.mesh) scene.remove(car.mesh);
   car.model = model; car.mesh = mkCar(model); car.mesh.visible = vis; car.cap = CARS[model].cap; scene.add(car.mesh); applyTime(); }
 function applyEcon(msg) {
-  for (const k of ['cars', 'activeCar', 'vehicle', 'loan', 'loanLimit', 'wanted', 'room', 'stash', 'workLeft', 'coffee', 'taxDebt', 'fed', 'fedState', 'cheer']) if (k in msg) eco[k] = msg[k];
+  for (const k of ['cars', 'activeCar', 'vehicle', 'loan', 'loanLimit', 'wanted', 'room', 'stash', 'workLeft', 'coffee', 'taxDebt', 'fed', 'fedState', 'cheer', 'stats', 'bag']) if (k in msg) eco[k] = msg[k];
+  if (msg.bag) bagSig = '';
   if (msg.biz !== undefined) { myBiz = msg.biz; if (myBiz) localStorage.setItem('moon_biz', myBiz); else localStorage.removeItem('moon_biz'); }
   if (msg.shops) applyShops(msg.shops);
   if (msg.catalog && msg.catalog.biz) applyShops(Object.values(msg.catalog.biz));
@@ -748,28 +758,83 @@ net.on('shares', msg => { offers = msg.offers || []; shopSig = ''; });
 // Переезд к своему делу: сервер зовёт по ключу заведения, место у дверей ищем сами —
 // координаты дверей и так известны клиенту, а свободную клетку рядом надо ещё подобрать.
 net.on('goto', msg => gotoPlace(msg.place));
-function placeDoor(key) {
-  const farm = FARM_DOORS.find(d => d.key === key); if (farm) return { x: farm.x, z: farm.z + 2 };
-  const b = world.buildings.find(q => q.name === key); if (!b) return null;
-  return { x: X(b.i + b.w / 2), z: Z(b.j + b.d) + 2.2 };   // перед фасадом, а не внутри стен
-}
-function freeSpotNear(p) {
-  if (!blockedAt(p.x, p.z)) return p;
-  for (let r = 1.5; r <= 9; r += 1.5) for (let a = 0; a < 12; a++) {
-    const x = p.x + Math.cos(a / 12 * 6.283) * r, z = p.z + Math.sin(a / 12 * 6.283) * r;
-    if (!blockedAt(x, z)) return { x, z };
+
+// ================= ЛИЧНЫЕ ВЕЩИ =================
+// Всё купленное лежит здесь партиями: что, откуда, когда сделано и сколько ещё годно.
+let bagOpen = false, bagSig = '';
+function drawBag() {
+  const box = document.getElementById('bag'); if (!box) return;
+  box.style.display = bagOpen ? 'block' : 'none'; if (!bagOpen) return;
+  const now = netDay * 24 + netTime;
+  const items = (eco.bag || []).map(b => { if (b.made == null || !PRODUCE[b.key]) return b;
+    const f = freshness({ key: b.key, made: b.made }, now);
+    return { ...b, fresh: f, word: freshWord(f), hours: hoursLeft({ key: b.key, made: b.made }, now) }; });
+  const sig = items.map(b => `${b.key}${b.n}${b.word}${Math.round(b.hours)}`).join('|') + Math.round(eco.fed || 0);
+  if (sig === bagSig) return; bagSig = sig;
+  document.getElementById('bagCount').textContent = items.length ? `· ${items.reduce((s, b) => s + b.n, 0)} шт · сытость ${Math.round(eco.fed ?? 100)}%` : '· пусто';
+  const rows = document.getElementById('bagRows'); rows.innerHTML = '';
+  if (!items.length) { const d = document.createElement('div'); d.className = 'bagRow';
+    d.innerHTML = '<span class="nm">Пока пусто<i>Еду берут в бакалее, у мясника, на ферме и в кофейне</i></span>'; rows.appendChild(d); return; }
+  for (const b of items) {
+    const d = document.createElement('div'); d.className = 'bagRow';
+    const cls = b.fresh > .66 ? 'ok' : b.fresh > .2 ? 'mid' : 'bad';
+    const left = b.hours === Infinity || b.hours > 9000 ? 'не портится' : b.fresh <= 0 ? 'выбросить' : `годно ещё ${Math.round(b.hours)} ч`;
+    d.innerHTML = `<span class="nm">${b.name} ×${b.n}<i>${b.from} · ${left}</i></span><span class="fr ${cls}">${b.word}</span>`;
+    const eat = document.createElement('button'); eat.textContent = b.fed ? `съесть +${b.fed}` : 'съесть';
+    eat.addEventListener('click', () => { net.send({ t: 'biz', place: 'bag', act: 'eat', arg: b.idx }); bagSig = ''; });
+    const drop = document.createElement('button'); drop.textContent = 'выбросить';
+    drop.addEventListener('click', () => { net.send({ t: 'biz', place: 'bag', act: 'drop', arg: b.idx }); bagSig = ''; });
+    d.appendChild(eat); d.appendChild(drop); rows.appendChild(d);
   }
-  return p;
+}
+function toggleBag() { bagOpen = !bagOpen; bagSig = ''; drawBag(); }
+
+// ================= ОБУЧЕНИЕ =================
+// Одна задача за раз, проверяется по состоянию мира. Панель можно скрыть — и вернуть кнопкой.
+let tutOff = localStorage.getItem('moon_tut') === 'off', sawExchange = false, tutSig = '';
+function tutState() {
+  const st = eco.stats || {};
+  return { role: myRole === 'owner' ? 'owner' : myRole === 'law' ? 'law' : 'shiner', name: myName, inv,
+    stills: world.stills, jugs: eco.jugs, carJugs: eco.carJugs, fed: eco.fed == null ? 100 : eco.fed,
+    sold: st.sold || 0, swept: st.swept || 0, foundEvidence: st.found || 0, frisked: st.frisks || 0,
+    everDrove: (st.drove || 0) > 0 || player.inCar, caught: eco.caught || 0, cases,
+    nearStill: !!nearStill(12), myShop: myBiz ? shops[myBiz] : null, sawExchange };
+}
+function drawTutorial() {
+  const box = document.getElementById('tut'), btn = document.getElementById('tutShow'); if (!box) return;
+  if (tutOff) { box.style.display = 'none'; btn.style.display = 'block'; return; }
+  btn.style.display = 'none';
+  const { step, done, total, finished } = currentStep(tutState());
+  const sig = (step ? step.id : 'done') + done;
+  if (sig === tutSig) return; tutSig = sig;
+  box.style.display = 'block';
+  document.getElementById('tutTitle').textContent = finished ? 'Ты освоился' : step.title;
+  document.getElementById('tutStep').textContent = `${done} из ${total}`;
+  document.getElementById('tutTodo').textContent = finished ? 'Обучение пройдено. Дальше — своя игра.' : step.todo;
+  document.getElementById('tutWhy').textContent = finished ? '' : step.why;
+  document.getElementById('tutWhere').textContent = finished ? '' : step.where || '';
+  document.getElementById('tutFill').style.width = Math.round(done / total * 100) + '%';
+}
+{ const hide = document.getElementById('tutHide'), show = document.getElementById('tutShow');
+  if (hide) hide.addEventListener('click', () => { tutOff = true; localStorage.setItem('moon_tut', 'off'); drawTutorial(); });
+  if (show) show.addEventListener('click', () => { tutOff = false; localStorage.removeItem('moon_tut'); tutSig = ''; drawTutorial(); }); }
+function placeDoor(key) {
+  const farmIdx = key.startsWith('Ферма#') ? +key.split('#')[1] : -1;
+  if (farmIdx >= 0) { const f = world.farms[farmIdx]; return f ? { x: X(f.i + 1), z: Z(f.j + 2.6) } : null; }
+  const b = world.buildings.find(q => q.name === key);
+  return b ? doorPoint(b, TS) : null;   // со стороны фасада, а не всегда с юга
 }
 function gotoPlace(key) {
   const door = placeDoor(key); if (!door) return;
   if (interior) exitShop();
-  const spot = freeSpotNear(door);
+  // место ищем так, чтобы из него можно было УЙТИ: одной свободной точки мало — угол дома
+  // формально свободен, а шагнуть из него некуда.
+  const spot = spawnNear(blockedAt, door, PLAYER_R);
   player.inCar = false; player.mesh.visible = true;
   player.pos.set(spot.x, 0, spot.z); player.yaw = 0;
   camTarget.copy(player.pos);
-  const cs = freeSpotNear({ x: spot.x + 3.5, z: spot.z + 3.5 });   // машину подгоняем следом, чтобы не бежать за ней через город
-  if (!blockedAt(cs.x, cs.z)) { car.pos.set(cs.x, 0, cs.z); car.speed = 0; car.mesh.position.set(cs.x, hAt(cs.x, cs.z), cs.z); }
+  const cs = spawnNear(blockedAt, { x: spot.x + 4, z: spot.z + 4 }, 1.4);   // машине нужно больше места, чем человеку
+  if (canStand(blockedAt, cs.x, cs.z, 1.4)) { car.pos.set(cs.x, 0, cs.z); car.speed = 0; car.mesh.position.set(cs.x, hAt(cs.x, cs.z), cs.z); }
   const sh = shops[key];
   say(`Ты на месте: ${sh ? sh.name : key}`);
 }
@@ -893,42 +958,69 @@ function bizSend(act, extra = {}) { if (offline) return say('Это работа
 function refreshMarket() { if (!offline) setTimeout(() => net.send({ t: 'biz', place: 'CAR RENTAL', act: 'market' }), 300); }
 // Прилавок любого заведения: товары, машины, прокат, кредит, бензин, услуги и работа — одним списком.
 function shopRows() {
-  const name = interior.name, rows = [], cat = catalog, I = cat ? cat.I : 1, row = (label, run) => rows.push({ label, run });
+  const name = interior.name, rows = [], cat = catalog, I = cat ? cat.I : 1;
+  const row = (label, run, o = {}) => rows.push({ label, run, tab: o.tab || 'Купить', note: o.note, info: o.info });
+  const own = (label, run, o = {}) => row(label, run, { ...o, tab: 'Моё дело' });
+  const rep = (label, o = {}) => row(label, () => {}, { ...o, tab: 'Отчёт', info: true });
   // ---- своё дело: цена, товар, люди, витрина. Чужое свободное — можно выкупить лицензию
   const sh = shops[name];
   if (sh && BIZ[placeType(name)]) {
     const b = BIZ[placeType(name)], unit = b.unit;
+    // ---- прилавок с фермерским товаром: видно, что свежее, а что залежалось, и с какой фермы привезли
+    const now = netDay * 24 + netTime;
+    for (const pr of sh.produce || []) {
+      if (!sh.owner) { row(`${pr.name} — ${money(pr.price)} · свежее`, () => bizSend('buy_produce', { arg: pr.key }), { note: 'с городского склада' }); continue; }
+      if (pr.n <= 0) { row(`${pr.name} — закончилось`, () => say('Хозяин ещё не завёз'), { note: 'пусто' }); continue; }
+      const f = pr.made == null ? pr.fresh : freshness({ key: pr.key, made: pr.made }, now);
+      const left = pr.made == null ? pr.hours : hoursLeft({ key: pr.key, made: pr.made }, now);
+      row(`${pr.name} — ${money(pr.price)} · ${freshWord(f)}`, () => bizSend('buy_produce', { arg: pr.key }),
+        { note: `${pr.n} ${pr.unit} · ${pr.from || 'город'} · ${f <= 0 ? 'уже испорчено' : `годно ещё ${Math.round(left)} ч`}` });
+    }
     if (sh.owner === myName) {
       const y = sh.yesterday;
-      row(`▸ ${sh.name}: на прилавке ${sh.stock} × ${unit} · цена ${money(sh.price)} (${Math.round(sh.markup * 100)}%) · ${sh.open ? 'открыто' : 'закрыто'}`, () => {});
-      if (y) row(`▸ Вчера: приходило ${y.want ?? y.sold}, продано ${y.sold}, чистыми ${money(y.net)}` + (y.lostStock ? ` · ушли без товара ${y.lostStock}` : '') + (y.lostQueue ? ` · некому обслужить ${y.lostQueue}` : ''), () => {});
+      rep(`${sh.name}: на прилавке ${sh.stock} × ${unit} · цена ${money(sh.price)} (${Math.round(sh.markup * 100)}%) · ${sh.open ? 'открыто' : 'закрыто'}`);
+      rep(`Руки: ${sh.capacity} продаж в сутки · помощников ${sh.staff}/${ECON.BIZ_STAFF_MAX} · оборудование ${sh.equip || 0}/${ECON.BIZ_EQUIP_MAX} · вид ${sh.decor}/${ECON.BIZ_DECOR_MAX}`);
+      if (y) { rep(`Вчера приходило ${y.want ?? y.sold} · продано ${y.sold} · выручка ${money(y.revenue)} · чистыми ${money(y.profit ?? y.net)}`);
+        if (y.lostStock) rep(`Ушли без товара: ${y.lostStock} — завези больше`);
+        if (y.lostQueue) rep(`Некому обслужить: ${y.lostQueue} — нужны люди или оборудование`);
+        if (y.div) rep(`Дольщикам выплачено ${money(y.div)}`); }
+      else rep('Отчёт появится наутро, после первого торгового дня');
+      rep(`Содержание ${money(sh.upkeep)} в сутки · торговый сбор ${Math.round(ECON.BIZ_TAX * 100)}% с продажи`);
+
       if (sh.bar) {
-        row(`▸ В баре ${sh.gallons} гал. · берёшь у самогонщиков по ${money(sh.barBuy)} за галлон · наливаешь по ${money(sh.price)}`, () => {});
-        row(`Взять 5 гал. у контрабандистов — ${money(sh.barBuy * 1.35 * 5)} (у своих дешевле)`, () => bizSend('own_stock', { arg: 5 }));
-        row(`Взять 15 гал. у контрабандистов — ${money(sh.barBuy * 1.35 * 15)}`, () => bizSend('own_stock', { arg: 15 }));
+        own(`В баре ${sh.gallons} гал · берёшь у самогонщиков по ${money(sh.barBuy)}, наливаешь по ${money(sh.price)}`, () => {}, { info: true });
+        own(`Взять 5 гал у контрабандистов — ${money(sh.barBuy * 1.35 * 5)}`, () => bizSend('own_stock', { arg: 5 }), { note: 'у своих дешевле' });
+        own(`Взять 15 гал у контрабандистов — ${money(sh.barBuy * 1.35 * 15)}`, () => bizSend('own_stock', { arg: 15 }));
+      } else if ((sh.produce || []).length) {
+        for (const pr of sh.produce) own(`Завезти 10 × ${pr.name} — у ферм дешевле, у оптовика дороже`, () => bizSend('own_stock', { arg: 10, key: pr.key }),
+          { note: pr.n > 0 ? `сейчас ${pr.n} ${pr.unit}, ${pr.word}` : 'сейчас пусто' });
       } else {
-        row(`Завезти 10 × ${unit} — ${money(sh.cost * 10)}`, () => bizSend('own_stock', { arg: 10 }));
-        row(`Завезти 50 × ${unit} — ${money(sh.cost * 50)}`, () => bizSend('own_stock', { arg: 50 }));
+        own(`Завезти 10 × ${unit} — ${money(sh.cost * 10)}`, () => bizSend('own_stock', { arg: 10 }));
+        own(`Завезти 50 × ${unit} — ${money(sh.cost * 50)}`, () => bizSend('own_stock', { arg: 50 }));
       }
-      row(`Цена дешевле на 10% (сейчас ${money(sh.price)})`, () => bizSend('own_price', { arg: Math.max(.5, sh.markup - .1) }));
-      row(`Цена дороже на 10% (горожане берут до ${money(sh.ref * ECON.BIZ_CAP)})`, () => bizSend('own_price', { arg: Math.min(ECON.BIZ_CAP, sh.markup + .1) }));
-      row(`Нанять помощника (${sh.staff}/${ECON.BIZ_STAFF_MAX}) — ${money(ECON.BIZ_STAFF_WAGE * Math.sqrt(I))} в сутки · руки: ${sh.capacity} продаж`, () => bizSend('own_staff', { arg: 1 }));
-      if (sh.staff) row('Уволить помощника', () => bizSend('own_staff', { arg: -1 }));
-      if ((sh.equip || 0) < ECON.BIZ_EQUIP_MAX) row(`Оборудование: ${sh.equipName} (${sh.equip || 0}/${ECON.BIZ_EQUIP_MAX}) — ${money(sh.equipPrice)} · +${ECON.BIZ_EQUIP_CAP} продаж в сутки`, () => bizSend('own_equip'));
-      if (sh.decor < ECON.BIZ_DECOR_MAX) row(`Вложиться в вид: вывеска и порядок (${sh.decor}/${ECON.BIZ_DECOR_MAX}) — ${money(sh.decorPrice)}`, () => bizSend('own_decor'));
-      row(sh.open ? 'Закрыть заведение на сегодня' : 'Открыть заведение', () => bizSend('own_open'));
+      own(`Цена дешевле на 10% — сейчас ${money(sh.price)}`, () => bizSend('own_price', { arg: Math.max(.5, sh.markup - .1) }));
+      own(`Цена дороже на 10% — горожане берут до ${money(sh.ref * ECON.BIZ_CAP)}`, () => bizSend('own_price', { arg: Math.min(ECON.BIZ_CAP, sh.markup + .1) }));
+      own(`Нанять помощника (${sh.staff}/${ECON.BIZ_STAFF_MAX}) — ${money(ECON.BIZ_STAFF_WAGE * Math.sqrt(I))} в сутки`, () => bizSend('own_staff', { arg: 1 }),
+        { note: `сейчас руки тянут ${sh.capacity} продаж` });
+      if (sh.staff) own('Уволить помощника', () => bizSend('own_staff', { arg: -1 }));
+      if ((sh.equip || 0) < ECON.BIZ_EQUIP_MAX) own(`Оборудование: ${sh.equipName} — ${money(sh.equipPrice)}`, () => bizSend('own_equip'),
+        { note: `+${ECON.BIZ_EQUIP_CAP} продаж в сутки` });
+      if (sh.decor < ECON.BIZ_DECOR_MAX) own(`Обновить вид: вывеска и порядок (${sh.decor}/${ECON.BIZ_DECOR_MAX}) — ${money(sh.decorPrice)}`, () => bizSend('own_decor'));
+      own(sh.open ? 'Закрыть заведение на сегодня' : 'Открыть заведение', () => bizSend('own_open'));
       // доли: продать часть дела на бирже, следить за совладельцами
       const mineN = sharesOf(sh.shares, myName), listedN = offers.filter(o => o.place === (sh.key || name) && o.seller === myName).reduce((q, o) => q + o.n, 0);
       const fair = sh.shareFair || shareFair(sh.netAvg || 0, I, sh.license);
-      row(`▸ Долей у тебя ${mineN} из ${ECON.SHARES}` + (listedN ? ` · на бирже ${listedN}` : '') + ` · ориентир ${money(fair)} за долю`, () => {});
-      if (mineN - listedN >= 10) row(`Продать 10 долей по ${money(fair)} — выручка ${money(fair * 10 * (1 - ECON.SHARE_FEE))}`, () => bizSend('share_list', { n: 10, price: fair, arg: sh.key || name }));
-      if (mineN - listedN >= 25) row(`Продать 25 долей по ${money(fair)} (останется ${mineN - listedN - 25})`, () => bizSend('share_list', { n: 25, price: fair, arg: sh.key || name }));
-      for (const o of offers.filter(o => o.place === (sh.key || name) && o.seller === myName)) row(`Снять своё объявление: ${o.n} долей по ${money(o.price)}`, () => bizSend('share_unlist', { arg: o.id }));
-      row('Продать дело городу', () => bizSend('own_leave'));
-      return rows;
+      rep(`Долей у тебя ${mineN} из ${ECON.SHARES}` + (listedN ? ` · на бирже ${listedN}` : '') + ` · ориентир ${money(fair)} за долю`);
+      if (mineN - listedN >= 10) own(`Продать 10 долей по ${money(fair)}`, () => bizSend('share_list', { n: 10, price: fair, arg: sh.key || name }),
+        { note: `выручка ${money(fair * 10 * (1 - ECON.SHARE_FEE))}` });
+      if (mineN - listedN >= 25) own(`Продать 25 долей по ${money(fair)}`, () => bizSend('share_list', { n: 25, price: fair, arg: sh.key || name }),
+        { note: `останется ${mineN - listedN - 25}` });
+      for (const o of offers.filter(o => o.place === (sh.key || name) && o.seller === myName))
+        own(`Снять объявление: ${o.n} долей по ${money(o.price)}`, () => bizSend('share_unlist', { arg: o.id }));
+      own('Продать дело городу', () => bizSend('own_leave'));
     }
-    if (!sh.owner) row(`Выкупить ${b.name} — лицензия ${money(sh.license)} · содержание ${money(sh.upkeep)} в сутки`, () => bizSend('own_claim'));
-    else if (sh.owner !== myName) row(`▸ Хозяин: ${sh.owner}` + (sh.stock <= 0 ? ' · прилавок пуст' : ''), () => {});
+    else if (!sh.owner) row(`Выкупить ${b.name} — лицензия ${money(sh.license)}`, () => bizSend('own_claim'), { note: `содержание ${money(sh.upkeep)} в сутки` });
+    else row(`Хозяин: ${sh.owner}`, () => {}, { info: true, note: sh.stock <= 0 ? 'прилавок пуст' : `на прилавке ${sh.stock}` });
   }
   (SHOPS[placeType(name)] || []).forEach(([k, p0], i) => row(`${ITEM[k]} — ${money(cat ? cat.goods[k] : p0)}`, () => buyFrom(name, i)));
   if (DEALERS[name]) {
@@ -948,6 +1040,7 @@ function shopRows() {
         row(`Сдать ${m.name} по рынку — ${money(fair)}/сут`, () => { bizSend('rent_list', { arg: c.id, price: fair }); refreshMarket(); });
         row(`Сдать ${m.name} дёшево — ${money(fair * .75)}/сут (туристы берут охотнее)`, () => { bizSend('rent_list', { arg: c.id, price: fair * .75 }); refreshMarket(); }); } } }
   if (name === 'BANK') {
+    sawExchange = true;
     // биржа: тут скупают и продают доли в чужих делах
     row(`▸ Биржа долей: ${offers.length ? offers.length + ' объявлений' : 'объявлений нет'}`, () => bizSend('shares'));
     for (const o of offers.filter(o => o.seller !== myName).slice(0, 6))
@@ -978,19 +1071,28 @@ function shopRows() {
     row(`Сдать самогон (${eco.jugs + eco.carJugs} гал) — ${who} платит ${money(per)} за галлон`, () => { const n = eco.jugs + eco.carJugs; if (!n) return say('Нечего сдавать'); net.send({ t: 'sell', inCar: player.inCar }); }); }
   return rows;
 }
-let shopSig = '';
+let shopSig = '', shopTab = 'Купить';
 function renderShop() {
   const el = document.getElementById('shop'); if (!el) return; el.style.display = 'block';
-  const rows = shopRows(); const sig = interior.name + '|' + eco.cash + '|' + rows.map(r => r.label).join('|') + '|' + (shopOpen() ? 1 : 0);
+  const all = shopRows();
+  // Вкладки: покупателю не нужен пульт хозяина, а хозяину — постоянно мелькающий прилавок.
+  const tabs = [...new Set(all.map(r => r.tab || 'Купить'))];
+  if (!tabs.includes(shopTab)) shopTab = tabs[0];
+  const rows = all.filter(r => (r.tab || 'Купить') === shopTab);
+  const sig = interior.name + '|' + shopTab + '|' + eco.cash + '|' + rows.map(r => r.label).join('|') + '|' + (shopOpen() ? 1 : 0);
   if (sig === shopSig) return; shopSig = sig;
   document.getElementById('shopTitle').textContent = interior.title;
   document.getElementById('shopClerk').textContent = `${interior.clerkName}: «${interior.greet}»` + (shopOpen() ? '' : ' (закрыто, приходи с 8 до 18)');
+  const tabBox = document.getElementById('shopTabs'); tabBox.innerHTML = '';
+  if (tabs.length > 1) for (const t of tabs) { const b = document.createElement('button'); b.className = 'shopTab' + (t === shopTab ? ' on' : ''); b.textContent = t;
+    b.addEventListener('click', () => { shopTab = t; shopSig = ''; renderShop(); }); tabBox.appendChild(b); }
   const box = document.getElementById('shopRows'); box.innerHTML = '';
-  rows.forEach((r, i) => { const d = document.createElement('div'); d.className = 'shopRow'; d.textContent = `${i + 1}. ${r.label}`;
-    d.addEventListener('click', () => { if (!work) r.run(); }); box.appendChild(d); });
+  rows.forEach((r, i) => { const d = document.createElement('div'); d.className = 'shopRow' + (r.info ? ' info' : '');
+    d.innerHTML = `<span class="rowN">${r.info ? '' : i + 1}</span><span>${r.label}</span>` + (r.note ? `<i>${r.note}</i>` : '');
+    if (!r.info) d.addEventListener('click', () => { if (!work) r.run(); }); box.appendChild(d); });
   interior.rows = rows;
 }
-function shopKey(n) { if (interior) { const r = (interior.rows || shopRows())[n]; if (r && !work) r.run(); return; } buy(n); }
+function shopKey(n) { if (interior) { const r = (interior.rows || shopRows()).filter(q => !q.info)[n]; if (r && !work) r.run(); return; } buy(n); }
 
 // ================= КОЛЛИЗИИ =================
 const treeBuckets = new Map(); for (const t of world.trees) { const k = idx(Math.floor(t.i), Math.floor(t.j)); if (!treeBuckets.has(k)) treeBuckets.set(k, []); treeBuckets.get(k).push(t); }
@@ -1003,7 +1105,7 @@ function tryMove(pos, dx, dz, r) { const ok = (x, z) => !blockedAt(x + r, z) && 
 function carBlocked(x, z, yaw) { const c = Math.cos(yaw), s = Math.sin(yaw); for (const [lx, lz] of [[1.2, .5], [1.2, -.5], [-1.2, .5], [-1.2, -.5], [0, 0]]) { if (blockedAt(x + lx * c - lz * s, z - lx * s - lz * c)) return true; } return false; }
 
 // ================= ВВОД =================
-const keys = {}; addEventListener('keydown', e => { if (window.__designerOpen) return; keys[e.code] = true; if (e.code == 'KeyE' && !(keys.KeyQ && keys.KeyW)) interact(); if (e.code == 'KeyF') roleAction(); if (e.code == 'KeyG') igniteAction(); if (e.code == 'KeyB') toggleZones(); if (e.code == 'KeyV') voice.ptt(true); if (e.code == 'KeyT') fast = !fast; if (/^Digit[1-9]$/.test(e.code)) shopKey(+e.code[5] - 1); if (e.code == 'Escape' && interior) exitShop(); }); addEventListener('keyup', e => { keys[e.code] = false; if (e.code == 'KeyV') voice.ptt(false); });
+const keys = {}; addEventListener('keydown', e => { if (window.__designerOpen) return; keys[e.code] = true; if (e.code == 'KeyE' && !(keys.KeyQ && keys.KeyW)) interact(); if (e.code == 'KeyF') roleAction(); if (e.code == 'KeyG') igniteAction(); if (e.code == 'KeyB') toggleZones(); if (e.code == 'KeyV') voice.ptt(true); if (e.code == 'KeyI') toggleBag(); if (e.code == 'KeyT') fast = !fast; if (/^Digit[1-9]$/.test(e.code)) shopKey(+e.code[5] - 1); if (e.code == 'Escape' && interior) exitShop(); }); addEventListener('keyup', e => { keys[e.code] = false; if (e.code == 'KeyV') voice.ptt(false); });
 
 // ================= МОБИЛЬНОЕ УПРАВЛЕНИЕ =================
 // Один джойстик: пешком — направление, за рулём — газ/тормоз (Y) и руль (X). Кнопки Zoom меняют VIEW_H (и тем самым скорость времени).
@@ -1220,6 +1322,7 @@ function update(dt) {
     if (bar) { bar.style.width = f + '%'; bar.style.background = f < ECON.FED_HURT ? '#8a3a2a' : f < ECON.FED_SLOW ? '#a8792c' : '#6a7a3a'; } }
   document.getElementById('net').textContent = `${net.connected ? 'В сети' : 'Подключение…'} · ${myName} · ${roleTitle(myRole)} · игроков ${remote.size + 1} · округ: день ${netDay} ${String(Math.floor(netTime)).padStart(2, '0')}:${String(Math.floor(netTime % 1 * 60)).padStart(2, '0')} · подозрение ${Math.round(heat)}%` + (evidence.length ? ` · твоих следов ${evidence.length} (F — замести)` : '') + (eco.busted ? ` · облав на тебя: ${eco.busted}` : '');
   document.getElementById('inv').textContent = Object.entries(inv).filter(([, n]) => n > 0).map(([k, n]) => `${ITEM[k]} ×${n}`).join(' · ') || 'пусто';
+  drawTutorial(); drawBag();
   drawMap(interior ? interior.ret : focus);
 }
 // ---- заведения города: кто чем владеет, какие цены и сколько товара на прилавке
@@ -1236,7 +1339,7 @@ function fillRoleList() {
   for (const { type, b, sh, price } of [...free, ...taken]) {
     const btn = document.createElement('button'); const mine = sh.owner === myName, busy = sh.owner && !mine;
     btn.disabled = busy; if (busy) btn.style.opacity = .5;
-    btn.innerHTML = `${b.role} — ${b.name}<span>${busy ? `занято: ${sh.owner}` : mine ? 'твоё дело' : `свободно · цена за ${b.unit} · лицензия $${price}, первое дело бесплатно`}</span>`;
+    btn.innerHTML = `${b.role} — ${b.name}<span>${busy ? `занято: ${sh.owner}` : mine ? 'твоё дело' : `свободно · товар: ${b.unit} · лицензия $${price}, первое дело бесплатно`}</span>`;
     if (!busy) btn.addEventListener('click', () => setRole('owner', true, type));
     roleListEl.appendChild(btn); }
 }

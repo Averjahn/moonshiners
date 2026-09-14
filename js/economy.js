@@ -332,3 +332,77 @@ export const fedState = fed => fed >= 60 ? 'сыт' : fed >= ECON.FED_SLOW ? 'п
 export const barPourPrice = (type, I) => bizRef(type, I);
 export const barBuyPrice = (type, I, markup = 1) => round2(barPourPrice(type, I) * markup * ECON.BAR_POURS * ECON.BAR_BUY_K);
 export const barRaidChance = gallons => clamp(gallons * ECON.BAR_RAID_K, 0, .6);
+
+// ================= ФЕРМЕРСКИЕ ТОВАРЫ, СВЕЖЕСТЬ И ЛИЧНЫЕ ВЕЩИ =================
+// Каждый съестной товар делается на ферме в конкретный игровой час и с этого часа стареет.
+// Партия (lot) помнит, где и когда её сделали, — поэтому молоко из соседней лавки может быть
+// вчерашним, а сыр месячной выдержки всё ещё хорош. Купленное лежит в личных вещах, пока не съедят.
+export const PRODUCE = {
+  milk:   { name: 'Молоко',   unit: 'кувшин',  shelfH: 18,  price: .5,  fed: 20, farm: 4, sells: ['GROCERY', 'CAFE'] },
+  eggs:   { name: 'Яйца',     unit: 'десяток', shelfH: 120, price: .6,  fed: 25, farm: 3, sells: ['GROCERY', 'CAFE'] },
+  cheese: { name: 'Сыр',      unit: 'круг',    shelfH: 600, price: 1.4, fed: 40, farm: 1, sells: ['GROCERY'] },
+  butter: { name: 'Масло',    unit: 'брусок',  shelfH: 200, price: 1,   fed: 30, farm: 1, sells: ['GROCERY', 'COFFEE HOUSE'] },
+  pork:   { name: 'Свинина',  unit: 'отруб',   shelfH: 44,  price: 1.8, fed: 45, farm: 1, sells: ['BUTCHER'] },
+  veg:    { name: 'Овощи',    unit: 'корзина', shelfH: 140, price: .8,  fed: 25, farm: 3, sells: ['GROCERY', 'CAFE'] },
+  corn:   { name: 'Кукуруза', unit: 'мешок',   shelfH: 900, price: 1.5, fed: 8,  farm: 6, sells: ['FEED & SEED'] },
+  bread:  { name: 'Хлеб',     unit: 'буханка', shelfH: 52,  price: .5,  fed: 25, farm: 0, sells: ['COFFEE HOUSE'] },
+};
+Object.assign(ECON, {
+  SPOIL_PRICE_MIN: .45,     // лежалое дешевеет, но не бесплатно
+  SPOIL_FED_MIN: .5,        // и хуже насыщает
+  SPOIL_HP: 22,             // съел испорченное — отравился
+  FARM_YIELD_EQUIP: .5,     // каждое вложение в хозяйство добавляет половину базового урожая
+  BAG_SLOTS: 24,            // сколько партий влезает в личные вещи
+});
+// свежесть партии: 1 — только что с фермы, 0 — испортилось
+export function freshness(lot, now) {
+  const p = PRODUCE[lot.key]; if (!p || !p.shelfH) return 1;
+  return clamp(1 - (now - (lot.made || 0)) / p.shelfH, 0, 1);
+}
+export const spoiled = (lot, now) => freshness(lot, now) <= 0;
+export function freshWord(f) {
+  if (f <= 0) return 'испорчено';
+  if (f > .66) return 'свежее';
+  if (f > .33) return 'вчерашнее';
+  return 'на грани';
+}
+export const hoursLeft = (lot, now) => { const p = PRODUCE[lot.key]; return p && p.shelfH ? Math.max(0, round2(p.shelfH - (now - (lot.made || 0)))) : Infinity; };
+// цена с учётом свежести: лежалое отдают дешевле
+export const freshPrice = (base, f, I = 1) => round2(sinkPrice(base, I) * (ECON.SPOIL_PRICE_MIN + (1 - ECON.SPOIL_PRICE_MIN) * clamp(f, 0, 1)));
+export const producePrice = (key, f, I = 1) => freshPrice(PRODUCE[key].price, f, I);
+
+// ---- партии: кладём, берём самое старое первым, выбрасываем испорченное
+export function addLot(lots, key, n, now, from) {
+  const same = lots.find(l => l.key === key && l.made === now && l.from === from);
+  if (same) { same.n += n; return same; }
+  const lot = { key, n, made: now, from: from || 'город' }; lots.push(lot); return lot;
+}
+export function takeLot(lots, key, n) {           // со склада уходит самое старое — иначе свежее лежит, а старое гниёт
+  const mine = lots.filter(l => l.key === key).sort((a, b) => a.made - b.made);
+  let left = n; const taken = [];
+  for (const l of mine) { if (left <= 0) break; const q = Math.min(l.n, left); l.n -= q; left -= q; taken.push({ ...l, n: q }); }
+  for (let i = lots.length - 1; i >= 0; i--) if (lots[i].n <= 0) lots.splice(i, 1);
+  return { taken, short: left };
+}
+export const countLots = (lots, key) => lots.filter(l => !key || l.key === key).reduce((s, l) => s + l.n, 0);
+export function pruneSpoiled(lots, now) {         // испортившееся выбрасывают: это прямой убыток хозяина
+  const lost = [];
+  for (let i = lots.length - 1; i >= 0; i--) if (spoiled(lots[i], now)) { lost.push(lots.splice(i, 1)[0]); }
+  return lost;
+}
+// съесть партию: свежее кормит полностью, лежалое хуже, испорченное — отравление
+export function eatLot(lot, now) {
+  const p = PRODUCE[lot.key]; if (!p) return { fed: 0, hp: 0, text: 'это не едят' };
+  const f = freshness(lot, now);
+  if (f <= 0) return { fed: 0, hp: -ECON.SPOIL_HP, text: `${p.name} испортилось — тошнит` };
+  const fed = Math.round(p.fed * (ECON.SPOIL_FED_MIN + (1 - ECON.SPOIL_FED_MIN) * f));
+  return { fed, hp: 0, text: `${p.name} (${freshWord(f)}) — сытость +${fed}` };
+}
+// дневной урожай фермы: базовая корзина плюс прибавка за вложения в хозяйство
+export function farmYield(shop) {
+  const k = 1 + ECON.FARM_YIELD_EQUIP * (shop.equip || 0);
+  const out = {};
+  for (const [key, p] of Object.entries(PRODUCE)) if (p.farm) out[key] = Math.round(p.farm * k);
+  return out;
+}
+export const produceOf = place => Object.entries(PRODUCE).filter(([, p]) => p.sells.includes(place)).map(([k]) => k);
