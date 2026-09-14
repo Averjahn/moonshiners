@@ -2,7 +2,8 @@
 // габариты и палитра, снятые с неё же, состояния и анимации, которые нужно нарисовать.
 // ТЗ в Markdown собирается из этого же каталога — оно не может разойтись с игрой.
 import * as THREE from 'three';
-import { CARS as ECARS, SERVICES as ESERV, JOBS as EJOBS, GOODS as EGOODS, DEALERS as EDEALERS, dealerModels } from './economy.js';
+import { CARS as ECARS, SERVICES as ESERV, JOBS as EJOBS, GOODS as EGOODS, DEALERS as EDEALERS, dealerModels,
+  BIZ as EBIZ, ECON as EECON, bizRef, bizCost, bizLicense, bizUpkeep, bizPool } from './economy.js';
 
 const GENERAL = `# Moonshiners · ТЗ для художника
 
@@ -188,6 +189,13 @@ function catalog(F) {
       budget: 2500, tex: 'атлас 512; колёса — 4 отдельных узла wheel_fl/fr/rl/rr для вращения', notes: 'Фары — отдельные меши headlight_l/r (светятся ночью).',
       states: Object.keys(ECARS).map(k => ({ id: k, label: `${ECARS[k].name}${ECARS[k].dealer ? ' · $' + ECARS[k].price : ' · служебная'}`, make: () => F.mkCar(k) })),
       anims: [A('wheels_roll', 'процедурно', 0, 'вращение колёс по скорости'), A('steer', 'процедурно', 0, 'поворот передних колёс'), A('suspension', 'процедурно', 0, 'крен по рельефу и проседание под грузом'), A('engine_idle', 'цикл', .12, 'дрожь кузова на холостых'), A('door_open', 'один раз', .5, 'дверь водителя'), A('exhaust_puff', 'частицы', 1, 'выхлоп')] },
+    { id: 'biz', cat: 'Город', name: `Заведения игроков (${Object.keys(EBIZ).length} видов дел)`,
+      where: 'Каждое здание в городе и каждый амбар фермы может занять игрок: ставит цену, закупает товар, нанимает помощников и вкладывается в вид. Горожане ходят сами, их поток растёт как корень из числа игроков в сети.',
+      table: { head: ['Дело', 'Хозяин', 'Единица', 'Ориентир цены', 'Опт', 'Лицензия', 'Содержание в сутки', 'Горожан в день при 50 игроках'],
+        rows: Object.entries(EBIZ).map(([t, b]) => [b.name, b.role, b.unit, '$' + bizRef(t, 1), '$' + bizCost(t, 1), '$' + bizLicense(t, 1), '$' + bizUpkeep(t, 1), bizPool(t, 50).toFixed(1)]) },
+      notes: `Потолок цены — ${EECON.BIZ_CAP} ориентира: выше горожане не берут вовсе. Руки: сам хозяин ${EECON.BIZ_OWNER_CAP} продаж в сутки, каждый помощник ещё ${EECON.BIZ_STAFF_CAP} (не больше ${EECON.BIZ_STAFF_MAX}). Торговый сбор города ${Math.round(EECON.BIZ_TAX * 100)}% с каждой продажи. Три дня без денег на содержание — заведение отходит городу.`,
+      budget: 0, tex: 'отдельных моделей не требует: интерьеры и продавцы уже описаны выше',
+      anims: [] },
     { id: 'still', cat: 'Самогонный аппарат', name: 'Перегонный куб у ручья (сборка по шагам)', where: '23 поляны у ручьёв. Каждая часть появляется после своего шага сборки; облава или пожар сносит всё.',
       budget: 3000, tex: 'атлас 512: медь, дерево бочек, камень очага', notes: 'Каждая часть — отдельный узел: furnace, pot, thump_keg, worm_barrel, trough, mash_barrel, jugs, firewood.',
       states: [{ id: 's0', label: 'Пустая поляна', make: stillAt({ built: 0 }) }, { id: 's1', label: 'Очаг', make: stillAt({ built: 1 }) }, { id: 's2', label: '+ котёл', make: stillAt({ built: 2 }) }, { id: 's3', label: '+ thump keg', make: stillAt({ built: 3 }) },

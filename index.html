@@ -30,6 +30,8 @@
   #burn{position:fixed;inset:0;pointer-events:none;opacity:0;background:radial-gradient(ellipse at center,rgba(255,120,30,0) 45%,rgba(200,50,10,.75) 100%);transition:opacity .15s}
   #hpbar{display:inline-block;width:70px;height:7px;background:#d9ccb0;border-radius:3px;vertical-align:middle;margin-left:4px;overflow:hidden}
   #hpbar i{display:block;height:100%;background:#8a3a2a;width:100%}
+  #fedbar{display:inline-block;width:70px;height:7px;background:#d9ccb0;border-radius:3px;vertical-align:middle;margin-left:4px;overflow:hidden}
+  #fedbar i{display:block;height:100%;background:#6a7a3a;width:100%;transition:width .3s,background .3s}
   #windTag{color:#7a6a55;font-size:12px}
   #btnG{position:fixed;right:118px;bottom:34px;width:64px;height:64px;border-radius:50%;background:rgba(170,70,30,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 13px Georgia;align-items:center;justify-content:center}
   #voiceBtn{margin-top:4px;font:12px Georgia;background:#eee3c9;border:1px solid #b9a27a;border-radius:4px;padding:1px 6px;color:#4a3a27;cursor:pointer;transition:box-shadow .08s}
@@ -43,6 +45,8 @@
   #roleOverlay button{display:block;width:100%;margin:8px 0;padding:12px 14px;border-radius:8px;border:1px solid #b9a27a;background:#eadfc4;font:bold 16px Georgia;color:#3a2e1e;cursor:pointer;text-align:left}
   #roleOverlay button:hover{background:#e0d2b0}
   #roleOverlay button span{display:block;font:13px Georgia;color:#6a5a45;margin-top:3px}
+  #bizList{display:none;max-height:38vh;overflow:auto;margin-top:6px;border-top:1px solid #cbb891;padding-top:6px}
+  #bizList button{font-size:14px;padding:9px 12px}
   #btnF{position:fixed;right:26px;bottom:126px;width:78px;height:78px;border-radius:50%;background:rgba(60,80,120,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 14px Georgia;align-items:center;justify-content:center}
   #btnE{position:fixed;right:26px;bottom:34px;width:78px;height:78px;border-radius:50%;background:rgba(201,111,79,.85);border:2px solid #fff5e0;color:#fff5e0;font:bold 22px Georgia;align-items:center;justify-content:center}
   #zoomWrap{position:fixed;right:20px;bottom:224px;flex-direction:column;gap:8px}
@@ -61,7 +65,7 @@
 <script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"}}</script>
 </head><body>
 <canvas id="gl"></canvas>
-<div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><span id="net"></span><span id="hpRow" style="display:block;font-size:12px">здоровье <span id="hpbar"><i id="hpfill"></i></span> <span id="windTag"></span></span><button id="roleBtn">сменить сторону</button> <button id="voiceBtn">Голос: выкл</button><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
+<div class="panel" id="top"><b>Rocky Mount, VA · 1929</b><span id="clock">06:00</span><span id="status"></span><span id="net"></span><span id="hpRow" style="display:block;font-size:12px">здоровье <span id="hpbar"><i id="hpfill"></i></span> сытость <span id="fedbar"><i id="fedfill"></i></span> <span id="windTag"></span></span><button id="roleBtn">сменить сторону</button> <button id="voiceBtn">Голос: выкл</button><div id="inv" style="margin-top:4px;color:#7a6a55;max-width:360px"></div></div>
 <div class="panel" id="place"></div>
 <div class="panel" id="msg" style="top:60px;left:50%;transform:translateX(-50%);display:none;background:#3a2a1a;color:#f2e6c8;border-color:#7a5a3a"></div>
 <div class="panel" id="hint"><kbd>W A S D</kbd> идти · <kbd>E</kbd> машина / куб / продажа · <kbd>F</kbd> осмотр (закон) / замести следы · <kbd>G</kbd> поджечь (нужен керосин) · <kbd>V</kbd> говорить (голос рядом) · <kbd>B</kbd> карта пожарных отсеков · <kbd>1 2 3</kbd> купить в лавке · <kbd>T</kbd> ускорить время · колесо — зум: чем дальше камера, тем быстрее идёт время (до ×2)</div>
@@ -81,6 +85,8 @@
   <p>Сухой закон. Выбери сторону — мир и экономика общие для всех.</p>
   <button data-role="shiner">Самогонщик<span>Собрать аппарат у ручья, гнать, возить в город и заметать за собой следы (F)</span></button>
   <button data-role="law">Федеральный агент<span>Искать улики (F), собирать дело на куб, устраивать облавы и досматривать машины</span></button>
+  <button id="bizMore">Хозяин дела в городе<span>Лавка, кафе, гостиница, гараж, ферма: своя цена, свой товар, свои покупатели</span></button>
+  <div id="bizList"></div>
 </div></div>
 
 <script type="module" src="js/game.js"></script>

@@ -6,7 +6,8 @@ import { connect } from './net.js';
 import { buildInterior, PLACES, clerkFigure } from './interior.js';
 import { createFire, ignite as igniteFire, stepFire, tickMirror, applyChanges, fireDamageAt, nearestFuelCell, intensity as fireIntensity, S as FS, FUEL_PROPS } from './fire.js';
 import { setupDesigner } from './designer.js';
-import { CARS, ECON, SERVICES, JOBS, DEALERS, dealerModels, resale, repairCost, fairRent } from './economy.js';
+import { CARS, ECON, SERVICES, JOBS, DEALERS, dealerModels, resale, repairCost, fairRent, BIZ, bizRef, bizLicense, bizPriceFit,
+  shareFair, sharePriceBounds, sharesOf, fedSpeed, fedState } from './economy.js';
 import { createVoice } from './voice.js';
 
 // ================= НАСТРОЙКИ =================
@@ -542,6 +543,7 @@ function lamb(c) { return new THREE.MeshLambertMaterial({ color: c }); }
 const SKIN = {
   shiner: { legs: '#3a4a6a', torso: '#5a6a8a', shirt: '#c9a56b', arms: '#c9a56b', hat: '#6b4a2a', car: '#2b2b2b' },
   law:    { legs: '#242c3c', torso: '#2d3a52', shirt: '#dfe4ee', arms: '#2d3a52', hat: '#1b2233', car: '#141c2b' },
+  owner:  { legs: '#4a4438', torso: '#7a6a4a', shirt: '#efe6cf', arms: '#efe6cf', hat: '#8a7a58', car: '#3a4a3a' },   // фартук и рубаха лавочника
 };
 function mkPlayer(role = 'shiner') {
   const c = SKIN[role] || SKIN.shiner, g = new THREE.Group();
@@ -615,15 +617,18 @@ const ai = [];
   for (const a of ai) scene.add(a.mesh); }
 
 // ================= ЭКОНОМИКА (минимальная петля) =================
-const eco = { cash: 0, jugs: 0, carJugs: 0 };
+const eco = { fed: 100, cash: 0, jugs: 0, carJugs: 0 };
 // ================= СЕТЬ (общий мир на всех) =================
 const myName = (() => { const q = new URLSearchParams(location.search).get('name'); if (q) { localStorage.setItem('moon_name', q); return q; } let n = localStorage.getItem('moon_name'); if (!n) { n = 'Bootlegger' + Math.floor(100 + Math.random() * 900); localStorage.setItem('moon_name', n); } return n; })();
 // ---- РОЛЬ. Самогонщик гонит и заметает следы, закон ищет улики и рубит кубы.
 const qRole = new URLSearchParams(location.search).get('role');
-let myRole = (qRole === 'law' || qRole === 'shiner') ? qRole : (localStorage.getItem('moon_role') || null);
-const roleTitle = r => r === 'law' ? 'Федеральный агент' : 'Самогонщик';
-function setRole(r, tell) {
-  if (r !== 'law' && r !== 'shiner') return;
+let myRole = (qRole === 'law' || qRole === 'shiner' || qRole === 'owner') ? qRole : (localStorage.getItem('moon_role') || null);
+let myBiz = localStorage.getItem('moon_biz') || null;          // какое дело ведёт хозяин
+let shops = {};                                                // состояние всех заведений города
+const roleTitle = r => r === 'law' ? 'Федеральный агент' : r === 'owner' ? ((BIZ[String(myBiz).split('#')[0]] || {}).role || 'Хозяин дела') : 'Самогонщик';
+function setRole(r, tell, biz) {
+  if (r !== 'law' && r !== 'shiner' && r !== 'owner') return;
+  if (r === 'owner') { if (biz) myBiz = biz; if (!myBiz) return; localStorage.setItem('moon_biz', myBiz); }
   const changed = myRole !== r; myRole = r; localStorage.setItem('moon_role', r);
   if (changed || !player.mesh.userData.role) {
     const vis = player.mesh.visible; scene.remove(player.mesh); player.mesh = mkPlayer(r); player.mesh.userData.role = r; player.mesh.visible = vis; scene.add(player.mesh);
@@ -631,7 +636,7 @@ function setRole(r, tell) {
   }
   const bf = document.getElementById('btnF'); if (bf) bf.textContent = r === 'law' ? 'Осмотр' : 'Замести';
   const ov = document.getElementById('roleOverlay'); if (ov) ov.style.display = 'none';
-  if (tell) net.send({ t: 'role', role: r });
+  if (tell) net.send({ t: 'role', role: r, biz: r === 'owner' ? myBiz : undefined });
 }
 let myId = null, netTime = 6.5, netDay = 1, heat = 0;
 const remote = new Map(); // id -> { walk, car, buf: снимки с сервера, disp: что рисуем сейчас, inCar, name }
@@ -712,7 +717,7 @@ function sendMove(realDt) {
 const net = connect(myName, myRole || 'shiner');
 let evidence = [], cases = {};
 net.on('welcome', msg => { myId = msg.id; netTime = msg.time; netDay = msg.day; heat = msg.heat; eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; mergeStills(msg.stills); applyPlayers(msg.players, msg.now); setRole(msg.role); });
-net.on('you', msg => { eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; if (msg.role) setRole(msg.role); });
+net.on('you', msg => { eco.cash = msg.cash; Object.assign(inv, msg.inv); eco.jugs = msg.jugs; eco.carJugs = msg.carJugs; eco.busted = msg.busted; eco.caught = msg.caught; if (msg.role) setRole(msg.role, false, msg.biz); });
 net.on('evidence', msg => { evidence = msg.list; cases = msg.cases || {}; syncEvidence(); });
 // ---- экономика: гараж игрока, кредит, розыск и цены города приходят с сервера
 let catalog = null, market = null, vehKey = '';
@@ -720,7 +725,10 @@ function rebuildCar(model, force) { if (!force && car.model === model && car.mes
   const vis = car.mesh ? car.mesh.visible : true; if (car.mesh) scene.remove(car.mesh);
   car.model = model; car.mesh = mkCar(model); car.mesh.visible = vis; car.cap = CARS[model].cap; scene.add(car.mesh); applyTime(); }
 function applyEcon(msg) {
-  for (const k of ['cars', 'activeCar', 'vehicle', 'loan', 'loanLimit', 'wanted', 'room', 'stash', 'workLeft', 'coffee', 'taxDebt']) if (k in msg) eco[k] = msg[k];
+  for (const k of ['cars', 'activeCar', 'vehicle', 'loan', 'loanLimit', 'wanted', 'room', 'stash', 'workLeft', 'coffee', 'taxDebt', 'fed', 'fedState', 'cheer']) if (k in msg) eco[k] = msg[k];
+  if (msg.biz !== undefined) { myBiz = msg.biz; if (myBiz) localStorage.setItem('moon_biz', myBiz); else localStorage.removeItem('moon_biz'); }
+  if (msg.shops) applyShops(msg.shops);
+  if (msg.catalog && msg.catalog.biz) applyShops(Object.values(msg.catalog.biz));
   if (msg.catalog) catalog = msg.catalog;
   const v = eco.vehicle, key = v ? `${v.model}|${v.rented}|${eco.activeCar}` : 'none';
   if (key === vehKey) return; const first = !vehKey; vehKey = key;
@@ -731,7 +739,10 @@ function applyEcon(msg) {
 }
 net.on('welcome', applyEcon); net.on('you', applyEcon);
 net.on('car', msg => { eco.vehicle = msg.vehicle; });
-net.on('econ', msg => { catalog = msg.catalog; });
+net.on('econ', msg => { catalog = msg.catalog; if (msg.catalog && msg.catalog.biz) applyShops(Object.values(msg.catalog.biz)); });
+net.on('shops', msg => { applyShops(msg.list); shopSig = ''; });   // чужая лавка подняла цену — увидим сразу
+net.on('shares', msg => { offers = msg.offers || []; shopSig = ''; });
+net.on('welcome', msg => { if (msg.offers) offers = msg.offers; });
 net.on('market', msg => { market = msg; shopSig = ''; });
 // часы сервера: смещение по пингу, чтобы все клиенты рисовали чужих в одном и том же моменте времени
 net.on('welcome', msg => { if (msg.now) { clockOffset = msg.now - Date.now(); clockSynced = true; } });
@@ -760,7 +771,8 @@ setTimeout(() => { if (!welcomed) { offline = true; eco.cash = 120; say('Сер�
 const inv = { copper: 0, pot: 0, worm: 0, barrel: 0, planks: 0, stone: 0, wood: 0, corn: 0, cornmeal: 0, sugar: 0, yeast: 0, kerosene: 0 }; // зеркало серверного инвентаря — сюда пишут только сообщения 'you'/'welcome'
 const ITEM = { copper: 'медный лист', pot: 'медный котёл', worm: 'змеевик', barrel: 'бочка', planks: 'доски', stone: 'камень', wood: 'дрова', corn: 'кукуруза', cornmeal: 'кукурузная мука', sugar: 'сахар', yeast: 'дрожжи', kerosene: 'керосин' };
 const HEAVY = new Set(['copper', 'pot', 'worm', 'barrel', 'planks', 'stone']);
-const SHOPS = { 'HARDWARE': [['copper', 6], ['kerosene', 3]], 'GROCERY': [['sugar', 2], ['yeast', 1]], 'FEED & SEED': [['corn', 1.5], ['barrel', 4]], 'Мельница': [['planks', 2]] };
+const SHOPS = { 'HARDWARE': [['copper', 6], ['kerosene', 3]], 'GROCERY': [['sugar', 2], ['yeast', 1]], 'FEED & SEED': [['corn', 1.5], ['barrel', 4]], 'Мельница': [['planks', 2]], 'Ферма': [['corn', 1.5]] };
+const placeType = place => String(place).split('#')[0];   // «Ферма#2» — вторая ферма, торгует тем же, чем любая ферма
 const MASH_NEED = { cornmeal: 2, sugar: 2, yeast: 1 }, RUN_WOOD = 3;
 const SELL_PRICE = 5, WALK_CAP = 2;
 const FERMENT_H = 30, RUN_H = 6;
@@ -802,11 +814,17 @@ function syncEvidence() {
 const IN_ORIGIN = { x: -80, z: 60 };
 let interior = null;
 const ENTERABLE = [...new Set([...world.buildings.filter(b => b.business && b.name !== 'BILLIARDS').map(b => b.name), 'Мельница', 'Депо'])];
+// амбары ферм: у каждой фермы свой ключ «Ферма#N», чтобы у неё был свой хозяин
+const FARM_DOORS = world.farms.map((f, q) => ({ key: `Ферма#${q}`, x: X(f.i + 1), z: Z(f.j + 1.5) }));
+function nearFarm(r = 6) { const f = player.inCar ? car.pos : player.pos; let best = null;
+  for (const d of FARM_DOORS) { const dist = Math.hypot(d.x - f.x, d.z - f.z); if (dist < r && (!best || dist < best.d)) best = { name: d.key, d: dist }; }
+  return best; }
 // Ближайшая дверь и расстояние до неё: расстояние нужно, чтобы E у припаркованной машины
 // сажал в машину, а не затаскивал в лавку, когда та стоит вплотную к дверям.
 function nearDoor() { const f = player.inCar ? car.pos : player.pos; let best = null;
   for (const n of ENTERABLE) { const b = nearBuilding(n, 5.5); if (!b) continue;
     const d = Math.hypot(X(b.i + b.w / 2) - f.x, Z(b.j + b.d / 2) - f.z); if (!best || d < best.d) best = { name: n, d }; }
+  const farm = nearFarm(); if (farm && (!best || farm.d < best.d)) best = farm;
   if (!best && nearSpeak()) best = { name: 'BILLIARDS', d: 0 };
   return best; }
 // своя машина рядом и в неё можно сесть
@@ -814,9 +832,10 @@ function carBoardable() { return !player.inCar && car.mesh.visible && (offline |
 function enterShop(name) {
   if (player.inCar) return say('Сначала выйди из машины');
   if (interior) return;
-  const b = buildInterior(name); b.group.position.set(IN_ORIGIN.x, 0, IN_ORIGIN.z); scene.add(b.group);
+  const type = placeType(name);   // «Ферма#2» рисуется как обычный амбар, но дело у неё своё
+  const b = buildInterior(type); b.group.position.set(IN_ORIGIN.x, 0, IN_ORIGIN.z); scene.add(b.group);
   // шоурум: в зале стоят машины салона (или парк конторы проката), обходить их надо, как в жизни
-  if (PLACES[name] && PLACES[name].showroom) { const models = DEALERS[name] ? dealerModels(name) : ['model_t', 'model_a', 'model_aa'], spots = [[-4.6, 1.0], [.4, 1.0], [5.0, 1.0], [-2.6, 3.7], [2.2, 3.7]];
+  if (PLACES[type] && PLACES[type].showroom) { const models = DEALERS[type] ? dealerModels(type) : ['model_t', 'model_a', 'model_aa'], spots = [[-4.6, 1.0], [.4, 1.0], [5.0, 1.0], [-2.6, 3.7], [2.2, 3.7]];
     models.slice(0, spots.length).forEach((id, q) => { const m = mkCar(id), [x, z] = spots[q]; m.remove(m.userData.spot); m.remove(m.userData.spot.target); m.position.set(x, 0, z); b.group.add(m);
       const L = (BODY[CARS[id].body] || BODY.sedan).len; b.colliders.push({ x0: x - L / 2, x1: x + L / 2, z0: z - .95, z1: z + .95 }); }); }
   if (name === 'CAR RENTAL' && !offline) net.send({ t: 'biz', place: name, act: 'market' });
@@ -844,7 +863,43 @@ function refreshMarket() { if (!offline) setTimeout(() => net.send({ t: 'biz', p
 // Прилавок любого заведения: товары, машины, прокат, кредит, бензин, услуги и работа — одним списком.
 function shopRows() {
   const name = interior.name, rows = [], cat = catalog, I = cat ? cat.I : 1, row = (label, run) => rows.push({ label, run });
-  (SHOPS[name] || []).forEach(([k, p0], i) => row(`${ITEM[k]} — ${money(cat ? cat.goods[k] : p0)}`, () => buyFrom(name, i)));
+  // ---- своё дело: цена, товар, люди, витрина. Чужое свободное — можно выкупить лицензию
+  const sh = shops[name];
+  if (sh && BIZ[placeType(name)]) {
+    const b = BIZ[placeType(name)], unit = b.unit;
+    if (sh.owner === myName) {
+      const y = sh.yesterday;
+      row(`▸ ${sh.name}: на прилавке ${sh.stock} × ${unit} · цена ${money(sh.price)} (${Math.round(sh.markup * 100)}%) · ${sh.open ? 'открыто' : 'закрыто'}`, () => {});
+      if (y) row(`▸ Вчера: приходило ${y.want ?? y.sold}, продано ${y.sold}, чистыми ${money(y.net)}` + (y.lostStock ? ` · ушли без товара ${y.lostStock}` : '') + (y.lostQueue ? ` · некому обслужить ${y.lostQueue}` : ''), () => {});
+      if (sh.bar) {
+        row(`▸ В баре ${sh.gallons} гал. · берёшь у самогонщиков по ${money(sh.barBuy)} за галлон · наливаешь по ${money(sh.price)}`, () => {});
+        row(`Взять 5 гал. у контрабандистов — ${money(sh.barBuy * 1.35 * 5)} (у своих дешевле)`, () => bizSend('own_stock', { arg: 5 }));
+        row(`Взять 15 гал. у контрабандистов — ${money(sh.barBuy * 1.35 * 15)}`, () => bizSend('own_stock', { arg: 15 }));
+      } else {
+        row(`Завезти 10 × ${unit} — ${money(sh.cost * 10)}`, () => bizSend('own_stock', { arg: 10 }));
+        row(`Завезти 50 × ${unit} — ${money(sh.cost * 50)}`, () => bizSend('own_stock', { arg: 50 }));
+      }
+      row(`Цена дешевле на 10% (сейчас ${money(sh.price)})`, () => bizSend('own_price', { arg: Math.max(.5, sh.markup - .1) }));
+      row(`Цена дороже на 10% (горожане берут до ${money(sh.ref * ECON.BIZ_CAP)})`, () => bizSend('own_price', { arg: Math.min(ECON.BIZ_CAP, sh.markup + .1) }));
+      row(`Нанять помощника (${sh.staff}/${ECON.BIZ_STAFF_MAX}) — ${money(ECON.BIZ_STAFF_WAGE * Math.sqrt(I))} в сутки · руки: ${sh.capacity} продаж`, () => bizSend('own_staff', { arg: 1 }));
+      if (sh.staff) row('Уволить помощника', () => bizSend('own_staff', { arg: -1 }));
+      if ((sh.equip || 0) < ECON.BIZ_EQUIP_MAX) row(`Оборудование: ${sh.equipName} (${sh.equip || 0}/${ECON.BIZ_EQUIP_MAX}) — ${money(sh.equipPrice)} · +${ECON.BIZ_EQUIP_CAP} продаж в сутки`, () => bizSend('own_equip'));
+      if (sh.decor < ECON.BIZ_DECOR_MAX) row(`Вложиться в вид: вывеска и порядок (${sh.decor}/${ECON.BIZ_DECOR_MAX}) — ${money(sh.decorPrice)}`, () => bizSend('own_decor'));
+      row(sh.open ? 'Закрыть заведение на сегодня' : 'Открыть заведение', () => bizSend('own_open'));
+      // доли: продать часть дела на бирже, следить за совладельцами
+      const mineN = sharesOf(sh.shares, myName), listedN = offers.filter(o => o.place === (sh.key || name) && o.seller === myName).reduce((q, o) => q + o.n, 0);
+      const fair = sh.shareFair || shareFair(sh.netAvg || 0, I, sh.license);
+      row(`▸ Долей у тебя ${mineN} из ${ECON.SHARES}` + (listedN ? ` · на бирже ${listedN}` : '') + ` · ориентир ${money(fair)} за долю`, () => {});
+      if (mineN - listedN >= 10) row(`Продать 10 долей по ${money(fair)} — выручка ${money(fair * 10 * (1 - ECON.SHARE_FEE))}`, () => bizSend('share_list', { n: 10, price: fair, arg: sh.key || name }));
+      if (mineN - listedN >= 25) row(`Продать 25 долей по ${money(fair)} (останется ${mineN - listedN - 25})`, () => bizSend('share_list', { n: 25, price: fair, arg: sh.key || name }));
+      for (const o of offers.filter(o => o.place === (sh.key || name) && o.seller === myName)) row(`Снять своё объявление: ${o.n} долей по ${money(o.price)}`, () => bizSend('share_unlist', { arg: o.id }));
+      row('Продать дело городу', () => bizSend('own_leave'));
+      return rows;
+    }
+    if (!sh.owner) row(`Выкупить ${b.name} — лицензия ${money(sh.license)} · содержание ${money(sh.upkeep)} в сутки`, () => bizSend('own_claim'));
+    else if (sh.owner !== myName) row(`▸ Хозяин: ${sh.owner}` + (sh.stock <= 0 ? ' · прилавок пуст' : ''), () => {});
+  }
+  (SHOPS[placeType(name)] || []).forEach(([k, p0], i) => row(`${ITEM[k]} — ${money(cat ? cat.goods[k] : p0)}`, () => buyFrom(name, i)));
   if (DEALERS[name]) {
     for (const id of dealerModels(name)) { const m = CARS[id];
       row(`${m.name} (${m.year}) — ${money(cat ? cat.cars[id].price : m.price)} · ${BODY_RU[m.body] || 'седан'} · багаж ${m.cap} гал · до ${Math.round(m.speed * 4)} mph`, () => bizSend('car_buy', { arg: id })); }
@@ -862,6 +917,12 @@ function shopRows() {
         row(`Сдать ${m.name} по рынку — ${money(fair)}/сут`, () => { bizSend('rent_list', { arg: c.id, price: fair }); refreshMarket(); });
         row(`Сдать ${m.name} дёшево — ${money(fair * .75)}/сут (туристы берут охотнее)`, () => { bizSend('rent_list', { arg: c.id, price: fair * .75 }); refreshMarket(); }); } } }
   if (name === 'BANK') {
+    // биржа: тут скупают и продают доли в чужих делах
+    row(`▸ Биржа долей: ${offers.length ? offers.length + ' объявлений' : 'объявлений нет'}`, () => bizSend('shares'));
+    for (const o of offers.filter(o => o.seller !== myName).slice(0, 6))
+      row(`Купить ${o.n} долей · ${o.name} · ${money(o.price)} за долю (ориентир ${money(o.fair)}) — всего ${money(o.price * o.n)}`, () => bizSend('share_buy', { arg: o.id, n: o.n }));
+    for (const [key, sh] of Object.entries(shops)) { const n = sharesOf(sh.shares, myName); if (!n || sh.owner === myName) continue;
+      row(`▸ Твои ${n} долей в «${sh.name}» · хозяин ${sh.owner || 'город'} · дивиденды по ${money((sh.netAvg || 0) * n / ECON.SHARES * (1 - ECON.SHARE_FEE))} в сутки`, () => {}); }
     if (eco.loan) { row(`Погасить кредит целиком — ${money(eco.loan.left)} (платёж в сутки ${money(eco.loan.due)}${eco.loan.missed ? `, просрочек ${eco.loan.missed}` : ''})`, () => bizSend('loan_pay', { arg: eco.loan.left }));
       row(`Внести ${money(Math.min(50, eco.loan.left))}`, () => bizSend('loan_pay', { arg: 50 })); }
     else if ((eco.loanLimit || 0) >= 10) { row(`Кредит на весь лимит — ${money(eco.loanLimit)} на ${ECON.LOAN_DAYS} дней`, () => bizSend('loan_take', { arg: eco.loanLimit }));
@@ -874,12 +935,16 @@ function shopRows() {
     row('Выковать медный котёл — 4 листа', () => { if (inv.copper < 4) return say(`Меди мало: ${inv.copper}/4`); startWork('Куём котёл', 2, () => offline ? (inv.copper -= 4, inv.pot++, say('Котёл готов')) : net.send({ t: 'craft', kind: 'pot' })); });
     row('Согнуть змеевик — 2 листа', () => { if (inv.copper < 2) return say(`Меди мало: ${inv.copper}/2`); startWork('Гнём змеевик', 1.5, () => offline ? (inv.copper -= 2, inv.worm++, say('Змеевик готов')) : net.send({ t: 'craft', kind: 'worm' })); });
     const v = eco.vehicle; if (v && !v.rented && v.cond < .995) row(`Отремонтировать ${CARS[v.model].name} (${Math.round(v.cond * 100)}%) — ${money(repairCost({ model: v.model, cond: v.cond }, I))}`, () => startWork('Ремонтируем машину', .8, () => bizSend('repair'))); }
-  for (const [id, sv] of Object.entries(SERVICES)) if (sv.place === name) row(`${sv.name} — ${money(cat ? cat.services[id] : sv.price)}`, () => bizSend('service', { arg: id }));
+  for (const [id, sv] of Object.entries(SERVICES)) if (sv.place === placeType(name))
+    row(`${sv.name} — ${money(cat ? cat.services[id] : sv.price)}` + (sv.fed ? ` · сытость +${sv.fed}` : ''), () => bizSend('service', { arg: id }));
   if (JOBS[name]) { const job = JOBS[name], left = eco.workLeft ?? ECON.WORK_CAP_H, h = Math.min(job.hours, left);
     row(h > 0 ? `${job.name}: ${h} ч за ${money((cat ? cat.wage : ECON.WAGE) * h)} (сегодня осталось ${left} ч)` : `${job.name}: на сегодня смены кончились`, () => { if (h <= 0) return say('Приходи завтра'); startWork(job.name, h, () => bizSend('work')); }); }
   if (name === 'HOTEL' && eco.room) { row(`Положить самогон в сейф номера (${eco.jugs + eco.carJugs} гал)`, () => bizSend('stash', { arg: 'put' })); if (eco.stash) row(`Забрать из сейфа (${eco.stash} гал)`, () => bizSend('stash', { arg: 'take' })); }
   if (name === 'Мельница') row(`Смолоть кукурузу (${inv.corn} меш.)`, () => { if (inv.corn <= 0) return say('Зерна нет'); startWork('Мелем кукурузу', .8, () => offline ? (inv.cornmeal += inv.corn, inv.corn = 0, say('Мука готова')) : net.send({ t: 'mill' })); });
-  if (name === 'BILLIARDS') row(`Сдать самогон (${eco.jugs + eco.carJugs} гал) — хозяин платит сейчас около ${money(cat ? (nightF() > .5 ? cat.speak : cat.speakDay) : SELL_PRICE)} за галлон`, () => { const n = eco.jugs + eco.carJugs; if (n <= 0) return say('Пусто'); if (offline) { eco.cash += n * SELL_PRICE; eco.jugs = eco.carJugs = 0; return say('Продано'); } net.send({ t: 'sell', inCar: eco.carJugs > 0 }); });
+  if (placeType(name) === 'BILLIARDS') { const bar = shops.BILLIARDS;
+    const per = bar && bar.owner && bar.owner !== myName ? bar.barBuy : (cat ? (nightF() > .5 ? cat.speak : cat.speakDay) : SELL_PRICE);
+    const who = bar && bar.owner ? (bar.owner === myName ? 'свой бар' : `хозяин ${bar.owner}`) : 'городской скупщик';
+    row(`Сдать самогон (${eco.jugs + eco.carJugs} гал) — ${who} платит ${money(per)} за галлон`, () => { const n = eco.jugs + eco.carJugs; if (!n) return say('Нечего сдавать'); net.send({ t: 'sell', inCar: player.inCar }); }); }
   return rows;
 }
 let shopSig = '';
@@ -941,9 +1006,12 @@ function nearestRemote(r = 7) { const f = player.inCar ? car.pos : player.pos; l
 function nearSpeak() { if (!speak) return false; const f = player.inCar ? car.pos : player.pos; return Math.hypot(X(speak.i + speak.w / 2) - f.x, Z(speak.j + speak.d / 2) - f.z) < 4.5; }
 function nearBuilding(name, r = 5) { const f = player.inCar ? car.pos : player.pos; for (const b of world.buildings) if (b.name == name) { const d = Math.hypot(X(b.i + b.w / 2) - f.x, Z(b.j + b.d / 2) - f.z); if (d < r) return b; } return null; }
 function nearTile(types, r = 2) { const f = player.inCar ? car.pos : player.pos; const i0 = Math.round(f.x / TS), j0 = Math.round(f.z / TS); for (let dj = -r; dj <= r; dj++) for (let di = -r; di <= r; di++) if (inb(i0 + di, j0 + dj) && types.includes(world.tiles[idx(i0 + di, j0 + dj)])) return true; return false; }
-function curShop() { if (interior) return SHOPS[interior.name] ? interior.name : null; for (const n of Object.keys(SHOPS)) if (nearBuilding(n)) return n; return null; }
+const shopLabel = place => { const sh = shops[place]; return sh && sh.name ? sh.name : String(place); };
+function curShop() { if (interior) return SHOPS[placeType(interior.name)] ? interior.name : null;
+  const f = nearFarm(); if (f) return f.name;
+  for (const n of Object.keys(SHOPS)) if (nearBuilding(n)) return n; return null; }
 function buy(n) { const shop = curShop(); if (shop) buyFrom(shop, n); }
-function buyFrom(shop, n) { const it = (SHOPS[shop] || [])[n]; if (!it) return; const k = it[0], price = catalog ? catalog.goods[k] : it[1];
+function buyFrom(shop, n) { const it = (SHOPS[placeType(shop)] || [])[n]; if (!it) return; const k = it[0], price = catalog ? catalog.goods[k] : it[1];
   if (!shopOpen()) return say('Закрыто. Лавки работают с 8 до 18');
   if (HEAVY.has(k) && !carNear(interior ? 14 : 6)) return say(`${ITEM[k]} на руках не унести — подгони машину к дверям`);
   if (eco.cash < price) return say(`Не хватает денег: ${ITEM[k]} стоит $${price}`);
@@ -1059,7 +1127,7 @@ function update(dt) {
   if (!player.inCar) {
     const mv = new THREE.Vector3(); if (keys.KeyW || keys.ArrowUp) mv.add(FWD); if (keys.KeyS || keys.ArrowDown) mv.sub(FWD); if (keys.KeyD || keys.ArrowRight) mv.add(RIGHT); if (keys.KeyA || keys.ArrowLeft) mv.sub(RIGHT);
     if (touchJoy.mag > .12) mv.addScaledVector(FWD, touchJoy.y).addScaledVector(RIGHT, touchJoy.x);
-    const moving = !work && mv.lengthSq() > 0; const sp = ((keys.ShiftLeft || touchJoy.mag > .85) ? 7 : 4.2) * (eco.coffee && eco.coffee > netDay * 24 + netTime ? 1.25 : 1);   // кофе из кафе — шаг бодрее
+    const moving = !work && mv.lengthSq() > 0; const sp = ((keys.ShiftLeft || touchJoy.mag > .85) ? 7 : 4.2) * (eco.coffee && eco.coffee > netDay * 24 + netTime ? 1.25 : 1) * fedSpeed(eco.fed == null ? 100 : eco.fed);   // кофе из кафе — шаг бодрее
     if (moving) { mv.normalize(); tryMove(player.pos, mv.x * sp * dt, mv.z * sp * dt, .3); player.yaw = Math.atan2(mv.x, mv.z); player.t += dt * 9; }
     const u = player.mesh.userData, sw = moving ? Math.sin(player.t) * .6 : 0; u.lL.rotation.x = sw; u.lR.rotation.x = -sw; u.aL.rotation.x = -sw; u.aR.rotation.x = sw;
     player.pos.y = interior ? 0 : hAt(player.pos.x, player.pos.z); player.mesh.position.copy(player.pos); player.mesh.rotation.y = player.yaw; focus = player.pos;
@@ -1091,7 +1159,7 @@ function update(dt) {
     placeEl.style.display = 'block'; placeEl.textContent = `${interior.title} · ${hint}`;
   } else { const sp = document.getElementById('shop'); if (sp) sp.style.display = 'none'; }
   let near = null; for (const b of world.buildings) if (b.name) { const d = Math.hypot(X(b.i + b.w / 2) - focus.x, Z(b.j + b.d / 2) - focus.z); if (d < 5 && (!near || d < near.d)) near = { d, name: b.speakeasy ? 'BILLIARDS · спикизи в подвале (E — продать)' : b.name }; }
-  const shop = curShop(); if (shop) near = { d: 0, name: `${shop}${shopOpen() ? '' : ' (закрыто до 8:00)'} · ` + SHOPS[shop].map(([k, p], n) => `${n + 1} — ${ITEM[k]} $${p}`).join(' · ') + (shop == 'Мельница' && inv.corn ? ' · E — смолоть кукурузу' : '') };
+  const shop = curShop(); if (shop) near = { d: 0, name: `${shopLabel(shop)}${shopOpen() ? '' : ' (закрыто до 8:00)'} · ` + (SHOPS[placeType(shop)] || []).map(([k, p], n) => `${n + 1} — ${ITEM[k]} $${catalog ? catalog.goods[k] : p}`).join(' · ') + (shop == 'Мельница' && inv.corn ? ' · E — смолоть кукурузу' : '') };
   if (nearBuilding('GARAGE')) near = { d: 0, name: 'GARAGE · E — ковать котёл (4 меди) / змеевик (2 меди)' };
   if (myRole === 'law') {   // закону важны не рецепты, а состояние дела
     const ls = nearStill(6);
@@ -1113,15 +1181,41 @@ function update(dt) {
   { const v = eco.vehicle, M = CARS[car.model] || CARS.model_t;
     const carInfo = v ? ` · ${M.name}${v.rented ? ' (прокат)' : ''} · бензин ${v.fuel.toFixed(1)}/${M.tank}${v.fuel <= 0 ? ' — ПУСТО' : v.fuel < M.tank * .15 ? ' — мало' : ''}` : (offline ? '' : ' · без машины');
     document.getElementById('status').textContent = `$${eco.cash} · ${player.inCar ? `в машине ${eco.carJugs}/${car.cap} гал · ${Math.round(Math.abs(car.speed) * 4)} mph` : `в руках ${eco.jugs}/${WALK_CAP} гал` + (player.pos.distanceTo(car.pos) < 3 && car.mesh.visible ? ' · E — сесть' : '')}${carInfo}`
-      + (eco.wanted ? ` · розыск ${eco.wanted}` : '') + (eco.loan ? ` · долг $${eco.loan.left}` : '') + (eco.room ? ' · номер в гостинице' : ''); }
+      + (eco.wanted ? ` · розыск ${eco.wanted}` : '') + (eco.loan ? ` · долг $${eco.loan.left}` : '') + (eco.room ? ' · номер в гостинице' : '')
+      + ` · ${eco.fedState || fedState(eco.fed == null ? 100 : eco.fed)} ${Math.round(eco.fed == null ? 100 : eco.fed)}%`
+      + (eco.cheer && eco.cheer > netDay * 24 + netTime ? ' · кураж' : ''); }
+  // полоска сытости рядом со здоровьем: жёлтая — пора поесть, красная — уже теряешь здоровье
+  { const f = Math.max(0, Math.min(100, eco.fed == null ? 100 : eco.fed)), bar = document.getElementById('fedfill');
+    if (bar) { bar.style.width = f + '%'; bar.style.background = f < ECON.FED_HURT ? '#8a3a2a' : f < ECON.FED_SLOW ? '#a8792c' : '#6a7a3a'; } }
   document.getElementById('net').textContent = `${net.connected ? 'В сети' : 'Подключение…'} · ${myName} · ${roleTitle(myRole)} · игроков ${remote.size + 1} · округ: день ${netDay} ${String(Math.floor(netTime)).padStart(2, '0')}:${String(Math.floor(netTime % 1 * 60)).padStart(2, '0')} · подозрение ${Math.round(heat)}%` + (evidence.length ? ` · твоих следов ${evidence.length} (F — замести)` : '') + (eco.busted ? ` · облав на тебя: ${eco.busted}` : '');
   document.getElementById('inv').textContent = Object.entries(inv).filter(([, n]) => n > 0).map(([k, n]) => `${ITEM[k]} ×${n}`).join(' · ') || 'пусто';
   drawMap(interior ? interior.ret : focus);
+}
+// ---- заведения города: кто чем владеет, какие цены и сколько товара на прилавке
+function applyShops(list) { for (const sh of list || []) shops[sh.key || sh.type] = sh; if (roleListEl) fillRoleList(); }
+let offers = [];   // объявления биржи: кто и почём продаёт доли в делах
+let roleListEl = null;
+// список персонажей: две стороны сухого закона и хозяева городских дел. Занятые дела видно сразу.
+function fillRoleList() {
+  const free = [], taken = [];
+  for (const sh of Object.values(shops)) { const b = BIZ[sh.type]; if (!b) continue;
+    const item = { type: sh.key || sh.type, b: { ...b, name: sh.name || b.name }, sh, price: sh.license };
+    (sh.owner && sh.owner !== myName ? taken : free).push(item); }
+  roleListEl.innerHTML = '';
+  for (const { type, b, sh, price } of [...free, ...taken]) {
+    const btn = document.createElement('button'); const mine = sh.owner === myName, busy = sh.owner && !mine;
+    btn.disabled = busy; if (busy) btn.style.opacity = .5;
+    btn.innerHTML = `${b.role} — ${b.name}<span>${busy ? `занято: ${sh.owner}` : mine ? 'твоё дело' : `свободно · цена за ${b.unit} · лицензия $${price}, первое дело бесплатно`}</span>`;
+    if (!busy) btn.addEventListener('click', () => setRole('owner', true, type));
+    roleListEl.appendChild(btn); }
 }
 // выбор стороны при первом заходе (и кнопка «сменить сторону» в панели)
 (function roleUI() {
   const ov = document.getElementById('roleOverlay'); if (!ov) return;
   ov.querySelectorAll('button[data-role]').forEach(b => b.addEventListener('click', () => setRole(b.dataset.role, true)));
+  roleListEl = document.getElementById('bizList');
+  const more = document.getElementById('bizMore');
+  if (more && roleListEl) more.addEventListener('click', () => { roleListEl.style.display = roleListEl.style.display === 'block' ? 'none' : 'block'; fillRoleList(); });
   const btn = document.getElementById('roleBtn'); if (btn) btn.addEventListener('click', () => { ov.style.display = 'flex'; });
   ov.style.display = myRole ? 'none' : 'flex';
   const bf = document.getElementById('btnF'); if (bf) bf.textContent = myRole === 'law' ? 'Осмотр' : 'Замести';

@@ -45,14 +45,17 @@ export const faucetPrice = (base, I) => round2(base * Math.sqrt(I)); // кран
 // ---- товары и услуги города (базовые цены при индексе 1)
 export const GOODS = { copper: 6, kerosene: 3, sugar: 2, yeast: 1, corn: 1.5, barrel: 4, planks: 2 };
 export const SERVICES = {
-  meal:     { place: 'CAFE', name: 'Обед', price: 1.2, hp: 100 },
-  coffee:   { place: 'CAFE', name: 'Кофе', price: .3, buffH: 2 },
+  meal:     { place: 'CAFE', name: 'Обед', price: 1.2, hp: 100, fed: 55 },
+  coffee:   { place: 'COFFEE HOUSE', name: 'Чашка кофе', price: .6, buffH: 2, fed: 4 },
+  bread:    { place: 'COFFEE HOUSE', name: 'Булка с маслом', price: .5, fed: 25 },
+  drink:    { place: 'BILLIARDS', name: 'Стопка у стойки', price: 1.1, fed: 8, cheerH: 3, wanted: -6 },
   room:     { place: 'HOTEL', name: 'Номер до утра (здоровье и тайник на ночь)', price: 6, hp: 100 },
   medicine: { place: 'DRUG STORE', name: 'Лекарство от ожогов', price: 4, hp: 100 },
   bandage:  { place: 'DRUG STORE', name: 'Бинт', price: 1.5, hp: 40 },
   haircut:  { place: 'BARBER', name: 'Стрижка и бритьё (−25 к розыску)', price: 3, wanted: -25 },
   suit:     { place: 'TAILOR', name: 'Новый костюм (−40 к розыску)', price: 18, wanted: -40 },
   telegram: { place: 'POST OFFICE', name: 'Телеграмма', price: .5 },
+  steak:    { place: 'BUTCHER', name: 'Окорок с собой', price: 2.8, hp: 70, fed: 45 },
 };
 export const JOBS = {
   'POST OFFICE': { name: 'Разбирать почту', hours: 2 },
@@ -153,3 +156,178 @@ export function loanSchedule(P, rate = ECON.LOAN_RATE, n = ECON.LOAN_DAYS) {
 export function newLoan(P, day) { return { principal: P, left: P, nextDay: day + 1, paidDays: 0, missed: 0, rate: ECON.LOAN_RATE, days: ECON.LOAN_DAYS }; }
 // платёж за день: тело равными долями + процент на остаток; пропуск — пеня и счётчик
 export function loanDue(loan) { const body = round2(Math.min(loan.left, loan.principal / loan.days)); return { body, interest: round2(loan.left * loan.rate), total: round2(body + loan.left * loan.rate) }; }
+
+// ================= ЗАВЕДЕНИЯ ИГРОКОВ =================
+// Игрок может владеть заведением: ставит цену, закупает товар оптом, нанимает помощника,
+// вкладывается в вид витрины. Деньги при этом НЕ печатаются:
+//  · неигровые покупатели (горожане) — кран, их поток растёт как √N, а не как N;
+//  · закупка у оптовика, содержание, зарплата помощника и торговый сбор — стоки;
+//  · покупка живым игроком — просто перевод денег владельцу минус тот же сбор.
+// Пустой прилавок, задранная цена и нехватка рук режут продажи по-разному — владелец
+// видит три отдельные причины потерь, а не одну «мало выручки».
+export const BIZ = {
+  GROCERY:          { name: 'Бакалея',          role: 'Бакалейщик',        unit: 'товар',   ref: 2.2, base: 9.6, sells: ['sugar', 'yeast'] },
+  BUTCHER:          { name: 'Мясная лавка',     role: 'Мясник',            unit: 'отруб',   ref: 2.8, base: 7.8, sells: ['steak'] },
+  'FEED & SEED':    { name: 'Корма и семена',   role: 'Торговец кормами',  unit: 'мешок',   ref: 4,   base: 4.8, sells: ['corn', 'barrel'] },
+  HARDWARE:         { name: 'Скобяная лавка',   role: 'Скобянщик',         unit: 'товар',   ref: 6,   base: 4.2, sells: ['copper', 'kerosene'] },
+  CAFE:             { name: 'Кафе',             role: 'Хозяин кафе',       unit: 'порция',  ref: 1.2, base: 15,   sells: ['meal', 'coffee'] },
+  HOTEL:            { name: 'Гостиница',        role: 'Хозяин гостиницы',  unit: 'номер',   ref: 6,   base: 3.6, sells: ['room'] },
+  'DRUG STORE':     { name: 'Аптека',           role: 'Аптекарь',          unit: 'склянка', ref: 4,   base: 3.3, sells: ['medicine', 'bandage'] },
+  BARBER:           { name: 'Цирюльня',         role: 'Цирюльник',         unit: 'клиент',  ref: 3,   base: 4.8, sells: ['haircut'] },
+  TAILOR:           { name: 'Ателье',           role: 'Портной',           unit: 'костюм',  ref: 18,  base: 2.2, sells: ['suit'] },
+  'POST OFFICE':    { name: 'Почта',            role: 'Почтмейстер',       unit: 'отправление', ref: .9, base: 12,   sells: ['telegram'] },
+  GARAGE:           { name: 'Гараж',            role: 'Механик',           unit: 'наряд',   ref: 12,  base: 3.6, sells: ['repair'] },
+  'FILLING STATION':{ name: 'Заправка',         role: 'Заправщик',         unit: 'заправка',ref: 2.4, base: 12,  sells: ['fuel'] },
+  'Мельница':       { name: 'Мельница',         role: 'Мельник',           unit: 'доска',   ref: 2,   base: 9,   sells: ['planks'] },
+  Ферма:            { name: 'Ферма',            role: 'Фермер',            unit: 'мешок',   ref: 1.5, base: 18,   sells: ['corn'], farm: true },
+  'COFFEE HOUSE':   { name: 'Кофейня',          role: 'Хозяин кофейни',    unit: 'чашка',   ref: .6,  base: 22,   sells: ['coffee', 'bread'] },
+  BILLIARDS:        { name: 'Подпольный бар',   role: 'Хозяин бара',       unit: 'стопка',  ref: 1.1, base: 26,   sells: ['drink'], bar: true },
+};
+Object.assign(ECON, {
+  BIZ_WHOLESALE: .55,     // оптовая цена единицы — доля ориентира розницы (сток: товар приходит извне округа)
+  BIZ_TAX: .08,           // торговый сбор города с каждой продажи — сток и с неигровых, и с игроков
+  BIZ_SWEET: .95, BIZ_CAP: 2.1,   // берут не глядя до .95 ориентира, выше 2.1 — не берут вовсе
+  BIZ_STREET_PASS: 1.2,   // часть горожан просто проходит мимо: одинокая лавка не забирает весь поток
+  BIZ_DECOR_STEP: 24, BIZ_DECOR_MAX: 4,   // вложение в витрину: дороже с каждым уровнем, потолок 4
+  BIZ_OWNER_CAP: 18, BIZ_STAFF_CAP: 14, BIZ_STAFF_WAGE: 3.5, BIZ_STAFF_MAX: 3,   // руки: сам хозяин и помощники
+  BIZ_EQUIP_CAP: 16, BIZ_EQUIP_MAX: 3, BIZ_EQUIP_K: .45,   // оборудование: второй прилавок, ледник, колонка — узкое место не только в людях
+  BIZ_UPKEEP: .008,       // содержание в сутки — доля цены лицензии; около 18% дневной маржи
+  BIZ_LICENSE: 22.5, BIZ_LICENSE_CAP: 150,   // лицензия ≈ 27 дней чистой прибыли; потолок — для самых людных мест
+  BIZ_DEBT_DAYS: 3,       // три дня без денег на содержание — заведение уходит городу
+});
+
+export const bizRef = (type, I) => sinkPrice(BIZ[type].ref, I);                         // ориентир розничной цены
+export const bizCost = (type, I) => sinkPrice(BIZ[type].ref * ECON.BIZ_WHOLESALE, I);   // оптовая закупка единицы
+export const bizPriceBounds = (type, I) => [round2(bizRef(type, I) * .5), round2(bizRef(type, I) * ECON.BIZ_CAP)];
+export const bizLicense = (type, I) => Math.round(Math.min(BIZ[type].base * ECON.BIZ_LICENSE, ECON.BIZ_LICENSE_CAP) * bizRef(type, I) / 10) * 10;
+export const bizUpkeep = (type, I) => round2(bizLicense(type, I) * ECON.BIZ_UPKEEP);
+export const bizDecorPrice = (type, level, I) => Math.round(sinkPrice(ECON.BIZ_DECOR_STEP, I) * (level + 1));
+// сколько горожан в день заходит за таким товаром во все заведения этого типа разом
+export const bizPool = (type, online) => round2(BIZ[type].base * Math.sqrt(Math.max(1, online)));
+// Пропускная способность — минимум из двух узких мест методики: люди и оборудование.
+// Без оборудования лишние руки упираются в один прилавок, без людей не помогает и лучший прилавок.
+export const bizCapacity = shop => ECON.BIZ_OWNER_CAP + ECON.BIZ_STAFF_CAP * (shop.staff || 0) + ECON.BIZ_EQUIP_CAP * (shop.equip || 0);
+export const bizEquipPrice = (type, level, I) => Math.round(bizLicense(type, I) * ECON.BIZ_EQUIP_K * (level + 1) / 5) * 5;
+export const bizEquipName = type => ({ CAFE: 'вторая стойка и плита', 'Ферма': 'сеялка и телега', 'FILLING STATION': 'вторая колонка',
+  'POST OFFICE': 'второе окно', GROCERY: 'второй прилавок', BUTCHER: 'ледник и колода', 'Мельница': 'второй постав',
+  GARAGE: 'подъёмник и станок', HOTEL: 'ещё номера', 'DRUG STORE': 'аптечный стол', BARBER: 'второе кресло',
+  TAILOR: 'швейная машина', HARDWARE: 'склад при лавке', 'FEED & SEED': 'зерновой бункер' }[type] || 'оборудование');
+// интерес к цене: до «сладкой» берут не думая, выше потолка — ноль, между ними гладко
+export function bizPriceFit(type, price, I) {
+  const ref = bizRef(type, I), sweet = ref * ECON.BIZ_SWEET, cap = ref * ECON.BIZ_CAP;
+  if (price > cap) return 0;
+  if (price <= sweet) return 1;
+  return (cap - price) / (cap - sweet);
+}
+// привлекательность: цена, витрина и наличие товара на прилавке
+// Пустой прилавок отпугивает, но НЕ вычёркивает лавку из потока — иначе владелец не увидит,
+// скольких покупателей потерял, пока стоял без товара.
+export function bizAttract(shop, I) {
+  if (!shop.open) return 0;
+  return bizPriceFit(shop.type, shop.price, I) * (.6 + .4 * ((shop.decor || 0) / ECON.BIZ_DECOR_MAX)) * ((shop.stock || 0) > 0 ? 1 : .35);
+}
+// доли потока между заведениями одного типа; сумма всегда меньше единицы — часть горожан проходит мимо
+export function bizShares(shops, I) {
+  const pw = shops.map(s => Math.pow(bizAttract(s, I), 1.25));
+  const total = pw.reduce((a, b) => a + b, 0) + ECON.BIZ_STREET_PASS;
+  return pw.map(p => p / total);
+}
+// Торговый день одного заведения. Три причины потерь считаем НЕЗАВИСИМО друг от друга, иначе
+// подсказка врёт: пока товара меньше, чем рук, владелец никогда не увидит «не хватило рук»
+// и не поймёт, что пора нанимать людей.
+export function bizDay(shop, share, pool, I) {
+  const want = Math.floor(pool * share), capacity = bizCapacity(shop), stock = shop.stock || 0;
+  const sold = Math.max(0, Math.min(want, stock, capacity));
+  const revenue = round2(sold * shop.price), tax = round2(revenue * ECON.BIZ_TAX);
+  const wage = round2(ECON.BIZ_STAFF_WAGE * (shop.staff || 0) * Math.sqrt(I));
+  const upkeep = bizUpkeep(shop.type, I);
+  return { sold, want, revenue, tax, wage, upkeep, net: round2(revenue - tax - wage - upkeep),
+    lostPrice: round2(Math.max(0, pool * (1 - share) - pool * ECON.BIZ_STREET_PASS / (ECON.BIZ_STREET_PASS + 1))),
+    lostStock: Math.max(0, Math.min(want, capacity) - stock),   // пришли, а товара нет
+    lostQueue: Math.max(0, want - capacity) };                  // пришли, а обслужить некому
+}
+// продажа живому игроку: деньги переходят владельцу, городу остаётся сбор
+export function bizSale(price, I) { const tax = round2(price * ECON.BIZ_TAX); return { price: round2(price), tax, toOwner: round2(price - tax) }; }
+
+// ================= БИРЖА: ДОЛИ В ДЕЛЕ =================
+// У каждого заведения 100 долей. Кто занял дело — держит все. Долю можно продать любому игроку:
+// продавец получает деньги сразу, покупатель — право на часть ежедневной прибыли.
+// Управление идёт за большинством: собрал больше половины — заведение твоё (недружественный выкуп возможен,
+// и это честно: продавая больше 49 долей, хозяин рискует делом, о чём его предупреждают).
+// Город берёт биржевой сбор с каждой сделки и с каждой выплаты — это сток, а не перевод.
+Object.assign(ECON, {
+  SHARES: 100,              // долей в каждом деле
+  SHARE_YIELD_DAYS: 20,     // ориентир цены доли: двадцать дней её прибыли
+  SHARE_FEE: .05,           // биржевой сбор с сделки и с дивидендов
+  SHARE_MIN_PRICE: .1,
+  SHARE_ASSET_K: .5,        // пол цены доли — половина лицензии на 100 долей: свежее дело не отдать за гроши
+  SHARE_PRICE_MIN_K: .3, SHARE_PRICE_MAX_K: 3,   // цену объявления держим в разумных пределах от ориентира
+});
+// Ориентир цены доли: либо двадцать дней её прибыли, либо доля имущества дела — что больше.
+// Без имущественного пола контрольный пакет в только что купленном заведении уходил бы за гроши.
+export const shareFair = (netPerDay, I = 1, license = 0) => round2(Math.max(
+  ECON.SHARE_MIN_PRICE,
+  license * ECON.SHARE_ASSET_K / ECON.SHARES,
+  netPerDay * ECON.SHARE_YIELD_DAYS / ECON.SHARES * Math.sqrt(I)));
+export const sharePriceBounds = (netPerDay, I = 1, license = 0) => {
+  const f = shareFair(netPerDay, I, license);
+  return [round2(Math.max(ECON.SHARE_MIN_PRICE, f * ECON.SHARE_PRICE_MIN_K)), round2(f * ECON.SHARE_PRICE_MAX_K)];
+};
+export const sharesOf = (shares, name) => (shares && shares[name]) || 0;
+export const freeShares = (shares, name, listed = 0) => Math.max(0, sharesOf(shares, name) - listed);
+// кто держит больше половины — тот и хозяин; при равенстве дело остаётся за нынешним
+export function majorityOwner(shares, current) {
+  let best = current, bestN = sharesOf(shares, current);
+  for (const [name, n] of Object.entries(shares || {})) if (n > bestN) { best = name; bestN = n; }
+  return bestN * 2 > ECON.SHARES ? best : current;
+}
+// сделка на бирже: продавец получает цену за вычетом сбора, сбор уходит городу
+export function shareTrade(price, n) {
+  const gross = round2(price * n), fee = round2(gross * ECON.SHARE_FEE);
+  return { gross, fee, toSeller: round2(gross - fee) };
+}
+// дележ дневной прибыли: каждому по долям за вычетом сбора; хозяину — остаток.
+// Убыток не делят: расходы заведения уже оплачены из кармана хозяина.
+export function dividends(net, shares, owner) {
+  if (!(net > 0)) return { total: 0, fee: 0, toOwner: round2(Math.min(0, net)), pay: {} };
+  const pay = {}; let handed = 0, fee = 0;
+  for (const [name, n] of Object.entries(shares || {})) {
+    if (name === owner || !n) continue;
+    const part = round2(net * n / ECON.SHARES), cut = round2(part * ECON.SHARE_FEE);
+    if (part <= 0) continue;
+    pay[name] = round2(part - cut); handed = round2(handed + part); fee = round2(fee + cut);
+  }
+  return { total: round2(handed - fee), fee, toOwner: round2(net - handed), pay };
+}
+
+// ================= ГОЛОД, КОФЕ И ПОДПОЛЬНЫЙ БАР =================
+// Сытость — то, ради чего игрок вообще заходит в кафе, к мяснику и в бар. Она убывает сама,
+// и голодный хуже работает: сначала медленнее ходит, потом теряет здоровье. Кофе греет ненадолго,
+// но не кормит. Бар — единственное место, где самогонщик сбывает товар живому хозяину, а не городу.
+Object.assign(ECON, {
+  FED_MAX: 100, FED_PER_H: 4.2,        // за сутки съедается чуть больше сотни: есть надо примерно раз в игровой день
+  FED_SLOW: 30, FED_HURT: 10,          // ниже 30 — вялый шаг, ниже 10 — здоровье уходит
+  FED_SLOW_K: .72, FED_HURT_HP: 2.5,   // насколько медленнее и сколько здоровья теряет в игровой час
+  DRINK_FED: 8, DRINK_CHEER_H: 3,      // выпивка почти не кормит, зато даёт «кураж» на три часа
+  CHEER_WANTED: -6,                    // за стойкой с людьми розыск утихает: свой парень, не чужак
+  BAR_BUY_K: .62,                      // почём бар берёт галлон у самогонщика — доля розничной цены стопки × порций
+  BAR_POURS: 8,                        // сколько стопок выходит из галлона
+  BAR_RAID_K: .012,                     // шанс облавы на бар за игровой день на каждый галлон в запасе
+});
+// Еда: сколько сытости даёт и где продаётся. Голод — общий стимул для кафе, мясника и фермы.
+export const FOOD = {
+  meal:    { fed: 55 }, steak: { fed: 45 }, coffee: { fed: 4 },
+  bread:   { fed: 25 }, drink: { fed: ECON.DRINK_FED },
+};
+export const fedAfter = (fed, hours) => clamp(fed - ECON.FED_PER_H * hours, 0, ECON.FED_MAX);
+export const fedEat = (fed, key) => clamp(fed + ((FOOD[key] || {}).fed || 0), 0, ECON.FED_MAX);
+// множитель скорости от сытости: сытый идёт как обычно, голодный — вяло
+export const fedSpeed = fed => (fed >= ECON.FED_SLOW ? 1 : ECON.FED_SLOW_K + (1 - ECON.FED_SLOW_K) * (fed / ECON.FED_SLOW));
+export const fedHurt = (fed, hours) => (fed <= ECON.FED_HURT ? round2(ECON.FED_HURT_HP * hours) : 0);
+export const fedState = fed => fed >= 60 ? 'сыт' : fed >= ECON.FED_SLOW ? 'проголодался' : fed >= ECON.FED_HURT ? 'голоден' : 'падает с ног';
+
+// Бар: берёт самогон у игроков галлонами и разливает стопками. Цена закупки привязана к тому,
+// почём он наливает: хозяин не может брать дороже, чем сам выручит, иначе разорится.
+export const barPourPrice = (type, I) => bizRef(type, I);
+export const barBuyPrice = (type, I, markup = 1) => round2(barPourPrice(type, I) * markup * ECON.BAR_POURS * ECON.BAR_BUY_K);
+export const barRaidChance = gallons => clamp(gallons * ECON.BAR_RAID_K, 0, .6);

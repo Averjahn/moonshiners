@@ -211,7 +211,7 @@ export function generate(seed = 7) {
   //      раскладываем их по лавкам от центра к окраине, участки покрупнее — автосалонам, прокату,
   //      бензоколонке и гостинице. Остальные витрины — декор. Имена меняются после генерации и
   //      не трогают генератор случайных чисел, поэтому остальной мир остаётся прежним.
-  { const BUSINESS = ['HARDWARE', 'GROCERY', 'FEED & SEED', 'GARAGE', 'BANK', 'BILLIARDS', 'FILLING STATION', 'FORD DEALER', 'AUTO EMPORIUM', 'CAR RENTAL', 'HOTEL', 'CAFE', 'DRUG STORE', 'BARBER', 'TAILOR', 'POST OFFICE'];
+  { const BUSINESS = ['HARDWARE', 'GROCERY', 'FEED & SEED', 'GARAGE', 'BANK', 'BILLIARDS', 'FILLING STATION', 'FORD DEALER', 'AUTO EMPORIUM', 'CAR RENTAL', 'HOTEL', 'CAFE', 'DRUG STORE', 'BARBER', 'TAILOR', 'POST OFFICE', 'BUTCHER', 'COFFEE HOUSE'];
     const BIG = new Set(['FORD DEALER', 'AUTO EMPORIUM', 'CAR RENTAL', 'FILLING STATION', 'HOTEL']);
     const DECOR = ['DRY GOODS', 'SHOES', 'BAKERY', 'BOOKS', 'JEWELER', 'NEWS', 'HATS', 'CANDY'];
     const shops = buildings.filter(b => b.kind === 'shop').sort((a, b) => dist(a.i + a.w / 2, a.j + a.d / 2) - dist(b.i + b.w / 2, b.j + b.d / 2));
